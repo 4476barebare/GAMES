@@ -1,0 +1,132 @@
+/**
+ * markdown.js
+ * gameState と自作エンジン解析データから、AI送信用の盤面Markdownを生成する
+ */
+
+import { tileIdToLabel, indicatorToDoraKind, kindToLabel } from "./tiles.js";
+import { analyzeDiscardCandidates } from "./shanten.js";
+import { getLegalActions } from "./engine.js";
+
+const WIND_JP = { E: "東", S: "南", W: "西", N: "北" };
+
+/**
+ * 指定座席プレイヤー視点の局面レポートMarkdownを生成
+ */
+export function buildTurnPromptMarkdown(state, seatIndex) {
+  const me = state.players[seatIndex];
+  const red = state.config.redDora;
+  const roundStr = `${WIND_JP[state.round.wind]}${state.round.number}局 ${state.round.honba}本場`;
+  const doraIndStr = state.wall.doraIndicators.map((id) => `\`${tileIdToLabel(id, red)}\``).join(", ");
+  const actualDoraStr = state.wall.doraIndicators
+    .map((id) => `\`${kindToLabel(indicatorToDoraKind(id))}\``)
+    .join(", ");
+
+  const lines = [];
+  lines.push(
+    `# 局面レポート（${roundStr} / 供託: ${state.round.riichiSticks}本 / 残り山: ${state.wall.remaining}枚 / ${state.turn.turnCount}巡目）`
+  );
+  lines.push("");
+  lines.push("## 1. 卓の基本情報");
+  lines.push(
+    `- **あなた:** ${WIND_JP[me.wind]}家（持ち点: ${me.points.toLocaleString()}点 / 状態: ${
+      me.isRiichi ? "リーチ中" : "門前"
+    }）`
+  );
+  lines.push(`- **ドラ表示牌:** ${doraIndStr}（現ドラ: ${actualDoraStr}）`);
+  lines.push(
+    `- **現在のフェーズ:** ${
+      state.turn.phase === "claim_check" ? "他家の打牌に対するロン判定" : "あなたの打牌選択（ツモ後）"
+    }`
+  );
+  lines.push("");
+
+  lines.push("## 2. 各プレイヤーの状況（河・持ち点）");
+  lines.push("| 席 | 名前 | 持ち点 | リーチ | 捨て牌（左から古い順 / `*`はツモ切り / `[R]`はリーチ宣言牌） |");
+  lines.push("| :--- | :--- | ---: | :---: | :--- |");
+
+  for (const pl of state.players) {
+    const isMe = pl.seatIndex === seatIndex;
+    const seatLabel = isMe ? `**${WIND_JP[pl.wind]} (YOU)**` : WIND_JP[pl.wind];
+    const nameLabel = isMe ? `**${pl.name}**` : pl.name;
+    const ptsLabel = isMe ? `**${pl.points.toLocaleString()}**` : pl.points.toLocaleString();
+    const riichiLabel = pl.isRiichi ? "リーチ" : "-";
+    const riverStr =
+      pl.discards.length === 0
+        ? "なし"
+        : pl.discards
+            .map((d) => {
+              let t = tileIdToLabel(d.tileId, red);
+              if (d.isTsumogiri) t += "*";
+              if (d.isRiichi) t += "[R]";
+              return `\`${t}\``;
+            })
+            .join(", ");
+    lines.push(`| ${seatLabel} | ${nameLabel} | ${ptsLabel} | ${riichiLabel} | ${riverStr} |`);
+  }
+  lines.push("");
+
+  lines.push("## 3. あなたの手牌");
+  const handStr = me.hand.map((id) => tileIdToLabel(id, red)).join(" ");
+  lines.push(`- **手牌（${me.hand.length}枚）:** \`${handStr}\``);
+  if (me.drawnTile !== null) {
+    lines.push(`- **今ツモった牌:** \`${tileIdToLabel(me.drawnTile, red)}\``);
+  }
+  if (state.turn.phase === "claim_check" && state.turn.lastDiscard) {
+    lines.push(
+      `- **直前の相手の捨て牌（ロン対象）:** \`${tileIdToLabel(state.turn.lastDiscard.tileId, red)}\``
+    );
+  }
+  lines.push(`- **フリテン状態:** ${me.isFuriten ? "フリテン中（ロン不可）" : "なし"}`);
+  lines.push("");
+
+  // 自作エンジン解析カンペ（打牌フェーズ時）
+  const legalActions = getLegalActions(state, seatIndex);
+  if (state.turn.phase === "discard" && !me.isRiichi) {
+    const visible = [];
+    state.players.forEach((pl) => pl.discards.forEach((d) => visible.push(d.tileId)));
+    state.wall.doraIndicators.forEach((d) => visible.push(d));
+
+    const candidates = analyzeDiscardCandidates(me.hand, me.drawnTile, visible, red);
+    const bestShanten = candidates.length > 0 ? candidates[0].shantenAfter : "-";
+
+    lines.push("## 4. システム解析カンペ（自作エンジン算出・厳密値）");
+    lines.push(
+      `- **打牌後の最小シャンテン数:** ${bestShanten}${bestShanten === 0 ? "（テンパイ）" : ""}`
+    );
+    lines.push("- **打牌候補ごとの受け入れ解析（上位6件）:**");
+    for (const c of candidates.slice(0, 6)) {
+      const waitNames =
+        c.waits.length > 0
+          ? c.waits.map((w) => `${w.label}(残${w.remaining})`).join(", ")
+          : "なし";
+      const canRiichi = legalActions.some((a) => a.action === "riichi" && a.tile === c.label);
+      lines.push(
+        `  - 打 \`${c.label}\` → ${c.shantenAfter}シャンテン / 有効牌: ${waitNames}（計${
+          c.acceptanceCount
+        }枚）${canRiichi ? " / **リーチ可**" : ""}`
+      );
+    }
+    lines.push("");
+  }
+
+  lines.push("## 5. 実行可能な合法アクション一覧（この中から必ず1つ選択）");
+  for (const act of legalActions) {
+    if (act.action === "tsumo") {
+      lines.push(
+        `- \`{"action": "tsumo", "tile": "${act.tile}"}\` （ツモ和了！ ${act.winInfo.label} ${act.winInfo.points}点）`
+      );
+    } else if (act.action === "ron") {
+      lines.push(
+        `- \`{"action": "ron", "tile": "${act.tile}"}\` （ロン和了！ ${act.winInfo.label} ${act.winInfo.points}点）`
+      );
+    } else if (act.action === "riichi") {
+      lines.push(`- \`{"action": "riichi", "tile": "${act.tile}"}\` （${act.tile}を切ってリーチ宣言）`);
+    } else if (act.action === "discard") {
+      lines.push(`- \`{"action": "discard", "tile": "${act.tile}"}\` （${act.tile}を切る）`);
+    } else if (act.action === "pass") {
+      lines.push(`- \`{"action": "pass", "tile": ""}\` （見送り）`);
+    }
+  }
+
+  return lines.join("\n");
+}
