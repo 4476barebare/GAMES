@@ -7,18 +7,20 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <!-- ヘッダー（1行コンパクト固定） -->
+  <!-- ヘッダー（横スクロール対応） -->
   <header class="topbar">
-    <div class="brand">
-      <span class="badge">4P半荘</span>
-      <h1>AI麻雀</h1>
-    </div>
-    <div class="topbar-actions">
-      <button id="btn-toggle-open" class="btn btn-secondary">公開:OFF</button>
-      <button id="btn-show-log-mobile" class="btn btn-secondary mobile-only">思考/ログ</button>
-      <button id="btn-show-md" class="btn btn-secondary">MD</button>
-      <button id="btn-settings" class="btn btn-secondary">設定/API</button>
-      <button id="btn-new-game" class="btn btn-primary">新規</button>
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="badge">4P半荘</span>
+        <h1>AI麻雀</h1>
+      </div>
+      <div class="topbar-actions">
+        <button id="btn-toggle-open" class="btn btn-secondary">公開:OFF</button>
+        <button id="btn-show-log-mobile" class="btn btn-secondary mobile-only">思考/ログ</button>
+        <button id="btn-show-md" class="btn btn-secondary">MD</button>
+        <button id="btn-settings" class="btn btn-secondary">設定/API</button>
+        <button id="btn-new-game" class="btn btn-primary">新規</button>
+      </div>
     </div>
   </header>
 
@@ -86,9 +88,12 @@
             </div>
           </div>
 
-          <!-- 自分の河（下） -->
-          <div class="river-area river-bottom">
-            <div class="river-grid" id="river-0"></div>
+          <!-- 自分の河（下）＋ 右側に自分の鳴き牌（副露）エリア -->
+          <div class="bottom-river-row">
+            <div class="river-area river-bottom">
+              <div class="river-grid" id="river-0"></div>
+            </div>
+            <div class="melds-self-side" id="melds-0"></div>
           </div>
         </div>
 
@@ -107,8 +112,8 @@
 
       <!-- 下：自分（Seat 0） -->
       <div class="seat-bottom">
-        <!-- アクションバー（自分の情報・シャンテン・鳴き/リーチ/和了ボタン） -->
-        <div class="action-bar">
+        <!-- アクションバー（鳴き判定中は自席ステータスを隠して全選択肢を表示） -->
+        <div class="action-bar" id="action-bar">
           <div class="seat-header compact-self" id="seat-header-0">
             <span class="wind-tag" id="wind-0">東</span>
             <strong class="seat-name" id="name-0">あなた</strong>
@@ -119,12 +124,11 @@
           <div class="action-buttons" id="action-buttons"></div>
         </div>
 
-        <!-- 自分の手牌（ここだけ横スクロール可能）＋ 鳴き牌エリア -->
+        <!-- 自分の手牌（横スクロール可能・鳴き牌は河の横へ移動済みなので100%幅使用） -->
         <div class="self-tiles-container">
           <div class="hand-scroll-wrap" id="hand-scroll-wrap">
             <div class="hand-row hand-self" id="hand-0"></div>
           </div>
-          <div class="melds-row self-melds" id="melds-0"></div>
         </div>
       </div>
     </section>
@@ -166,9 +170,7 @@
         </label>
       </div>
 
-      <div class="seat-config-list" id="seat-config-list">
-        <!-- JSで Seat 0〜3 の設定カードを生成 -->
-      </div>
+      <div class="seat-config-list" id="seat-config-list"></div>
 
       <div class="modal-footer">
         <button type="button" id="btn-close-settings" class="btn btn-secondary">閉じる</button>
