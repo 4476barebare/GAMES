@@ -1,5 +1,7 @@
 /**
  * [ver.1.0 拡張用スタブ]
+ * Google スプレッドシートの "Rooms" シートと接続して
+ * 4人麻雀ロビー募集および gameState JSON 同期を行うGASスクリプト雛形
  */
 
 const SHEET_NAME = "Rooms";
