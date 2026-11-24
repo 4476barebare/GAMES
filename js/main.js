@@ -1,12 +1,13 @@
 /**
  * main.js
- * 4人麻雀（半荘・鳴きあり・2段階タップ打牌・手牌黄色枠スルー）統括
+ * 4人麻雀（半荘・鳴きあり・卓全体スワイプ手牌スクロール・リーチ後オートツモ切り）統括
  */
 
 import { tileIdToLabel } from "./tiles.js";
 import {
   createMatchState,
   advanceNextRoundOrFinish,
+  getLegalActions,
   applyAction
 } from "./engine.js";
 import { buildTurnPromptMarkdown } from "./markdown.js";
@@ -35,9 +36,10 @@ let baseRulesMd = "";
 let personas = [];
 let openHand = false;
 let thinkingSeat = null;
-let selectedTileId = null; // 2段階タップ打牌用：1回目タップで選択中のtileId
+let selectedTileId = null;
 let isProcessing = false;
 let loopToken = 0;
+let suppressNextClickAfterSwipe = false;
 const syncAdapter = new LocalSyncAdapter();
 
 async function loadExternalAssets() {
@@ -149,8 +151,8 @@ function refreshUI() {
     gameState,
     { openHand, thinkingSeat, selectedTileId },
     {
-      // 2段階タップ打牌：1回目タップで選択枠移動、2回目同じ牌タップで打牌確定
       onHumanTileTap: (tileId) => {
+        if (suppressNextClickAfterSwipe) return;
         if (selectedTileId === tileId) {
           selectedTileId = null;
           const label = tileIdToLabel(tileId, gameState.config.redDora);
@@ -160,8 +162,8 @@ function refreshUI() {
           refreshUI();
         }
       },
-      // 鳴き判定中に手牌（黄色枠）タップでスルー
       onHumanPass: () => {
+        if (suppressNextClickAfterSwipe) return;
         selectedTileId = null;
         handlePlayerAction(0, { action: "pass", tile: "" }, {}, loopToken);
       },
@@ -212,9 +214,40 @@ async function handlePlayerAction(seatIndex, actionObj, meta = {}, token = loopT
   await stepGameLoop(token);
 }
 
+/**
+ * 次の手番または鳴き/ロン判定の処理（人間リーチ中のオートツモ切り＆AI思考ループ）
+ */
 async function stepGameLoop(token) {
   if (token !== loopToken || gameState.status !== "playing") return;
 
+  // 1. 人間プレイヤー（Seat 0）のリーチ中オートツモ切り判定
+  const self = gameState.players[0];
+  if (self.control === "human" && self.isRiichi) {
+    // 自分の打牌フェーズ：ツモ和了できるなら自動停止してボタン表示、それ以外はオートツモ切り
+    if (gameState.turn.phase === "discard" && gameState.turn.playerIndex === 0) {
+      const legal = getLegalActions(gameState, 0);
+      const canTsumo = legal.some((a) => a.action === "tsumo");
+      if (!canTsumo) {
+        const autoDiscard = legal.find((a) => a.action === "discard");
+        if (autoDiscard) {
+          await new Promise((r) => setTimeout(r, 420));
+          if (token !== loopToken || gameState.status !== "playing") return;
+          await handlePlayerAction(0, autoDiscard, {}, token);
+          return;
+        }
+      }
+      // ツモ和了できる場合は人間のボタン操作待ちで停止
+      return;
+    }
+
+    // リーチ中はエンジン仕様上、他家打牌に対する「ロン」のみ pendingClaims に含まれるため、
+    // claim_check に Seat 0 が入っていればロン可能＝自動で止まってロンボタン表示
+    if (gameState.turn.phase === "claim_check" && gameState.turn.pendingClaims.includes(0)) {
+      return;
+    }
+  }
+
+  // 2. AIプレイヤーの思考実行
   let targetSeat = null;
   if (gameState.turn.phase === "discard") {
     const p = gameState.players[gameState.turn.playerIndex];
@@ -259,6 +292,98 @@ async function stepGameLoop(token) {
     { thought: decision.thought, talk: decision.talk },
     token
   );
+}
+
+/**
+ * 卓全体のどこを横スワイプ（ドラッグ）しても手牌エリアが横スクロールするように連動
+ * （アクションボタン・設定ボタン等のタップ操作は干渉しないよう除外）
+ */
+function setupGlobalTableSwipeScroll() {
+  const board = document.getElementById("table-board");
+  const scrollWrap = document.getElementById("hand-scroll-wrap");
+  if (!board || !scrollWrap) return;
+
+  let isTracking = false;
+  let startX = 0;
+  let startScrollLeft = 0;
+  let hasDragged = false;
+
+  const isInteractiveControl = (target) => {
+    return Boolean(target.closest("button, input, select, textarea, a, dialog, #action-buttons"));
+  };
+
+  // タッチ操作（スマホ・タブレット）
+  board.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length !== 1) return;
+      if (isInteractiveControl(e.target)) {
+        isTracking = false;
+        return;
+      }
+      // hand-scroll-wrap 自体はブラウザ標準の慣性スクロールに任せる
+      if (e.target.closest("#hand-scroll-wrap")) {
+        isTracking = false;
+        return;
+      }
+      isTracking = true;
+      hasDragged = false;
+      startX = e.touches[0].clientX;
+      startScrollLeft = scrollWrap.scrollLeft;
+    },
+    { passive: true }
+  );
+
+  board.addEventListener(
+    "touchmove",
+    (e) => {
+      if (!isTracking || e.touches.length !== 1) return;
+      const dx = e.touches[0].clientX - startX;
+      if (Math.abs(dx) > 6) {
+        hasDragged = true;
+        scrollWrap.scrollLeft = startScrollLeft - dx;
+      }
+    },
+    { passive: true }
+  );
+
+  board.addEventListener("touchend", () => {
+    if (isTracking && hasDragged) {
+      suppressNextClickAfterSwipe = true;
+      setTimeout(() => {
+        suppressNextClickAfterSwipe = false;
+      }, 80);
+    }
+    isTracking = false;
+  });
+
+  // マウスドラッグ操作（PC確認用）
+  board.addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || isInteractiveControl(e.target)) return;
+    isTracking = true;
+    hasDragged = false;
+    startX = e.clientX;
+    startScrollLeft = scrollWrap.scrollLeft;
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!isTracking) return;
+    const dx = e.clientX - startX;
+    if (Math.abs(dx) > 6) {
+      hasDragged = true;
+      scrollWrap.scrollLeft = startScrollLeft - dx;
+    }
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (isTracking && hasDragged) {
+      suppressNextClickAfterSwipe = true;
+      setTimeout(() => {
+        suppressNextClickAfterSwipe = false;
+      }, 80);
+    }
+    isTracking = false;
+  });
 }
 
 function renderSeatSettingsForm(currentSettings) {
@@ -308,6 +433,8 @@ function renderSeatSettingsForm(currentSettings) {
 }
 
 function bindEvents() {
+  setupGlobalTableSwipeScroll();
+
   document.getElementById("btn-new-game").addEventListener("click", () => {
     if (confirm("現在の半荘を破棄して、東1局から新しく始めますか？")) {
       startNewMatch();

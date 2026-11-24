@@ -1,6 +1,6 @@
 /**
  * ui.js
- * 4人麻雀 UI描画（ツモ牌/最新相手捨て牌の黄色枠・2段階タップ打牌・手牌全体黄色枠スルー・河横の副露表示）
+ * 4人麻雀 UI描画（4家すべての河横に副露を整列・ツモ牌/最新相手捨て牌の黄色枠・2段階タップ打牌・手牌黄色枠スルー）
  */
 
 import { getTileVisual, tileIdToLabel } from "./tiles.js";
@@ -37,7 +37,7 @@ function createTileElement(tileId, options = {}) {
   if (vis.bottom) {
     const bot = document.createElement("span");
     bot.className = vis.cls;
-    bot.style.fontSize = options.variant === "self" ? "0.66rem" : "0.52rem";
+    bot.style.fontSize = options.variant === "self" ? "0.66rem" : "0.5rem";
     bot.textContent = vis.bottom;
     div.appendChild(bot);
   }
@@ -103,7 +103,7 @@ export function renderGame(state, uiOptions, handlers) {
     banner.textContent = `${WIND_JP[activePlayer.wind]}:${activePlayer.name}`;
   }
 
-  // 直前の相手（Seat 1, 2, 3）の最新捨て牌IDを特定（黄色枠ハイライト用）
+  // 直前の相手（Seat 1, 2, 3）の最新捨て牌IDを特定
   const lastDiscard = state.turn.lastDiscard;
   const latestOppDiscardTileId =
     lastDiscard && lastDiscard.playerIndex !== 0 ? lastDiscard.tileId : null;
@@ -147,7 +147,7 @@ export function renderGame(state, uiOptions, handlers) {
       );
     });
 
-    // 副露（鳴き牌）表示（Seat 0 は自分の河の右側へ配置）
+    // 4家それぞれの河の横に配置された副露（鳴き牌）コンテナを描画
     const meldsEl = document.getElementById(`melds-${seat}`);
     if (meldsEl) {
       renderMelds(meldsEl, p.melds, red);
@@ -171,7 +171,6 @@ export function renderGame(state, uiOptions, handlers) {
         state.turn.phase === "claim_check" &&
         state.turn.pendingClaims.includes(0);
 
-      // 鳴き判定中は手牌スクロール枠全体を黄色い枠で囲み、タップでスルー
       const scrollWrap = document.getElementById("hand-scroll-wrap");
       scrollWrap.classList.toggle("through-target", isHumanClaimTurn);
       scrollWrap.onclick = isHumanClaimTurn ? () => handlers.onHumanPass() : null;
@@ -196,7 +195,6 @@ export function renderGame(state, uiOptions, handlers) {
 
       if (p.drawnTile !== null) {
         const isSelected = isHumanDiscardTurn && uiOptions.selectedTileId === p.drawnTile;
-        // ツモ牌には常に黄色い枠（highlightYellow）を付与
         handEl.appendChild(
           createTileElement(p.drawnTile, {
             variant: "self",
@@ -249,7 +247,6 @@ export function renderGame(state, uiOptions, handlers) {
   const shantenEl = document.getElementById("shanten-info");
   const btnBox = document.getElementById("action-buttons");
 
-  // 鳴き判定中は「南 あなた 31,200」とシャンテン表示を隠し、全鳴き/ロン選択肢をフル幅表示
   actionBarEl.classList.toggle("claim-mode", isHumanClaimTurn);
   selfHeaderEl.classList.toggle("hidden", isHumanClaimTurn);
   shantenEl.classList.toggle("hidden", isHumanClaimTurn);
@@ -290,7 +287,7 @@ export function renderGame(state, uiOptions, handlers) {
       btnBox.appendChild(b);
     }
 
-    // 2. リーチ（1タップ選択中の牌がリーチ可能ならそのボタンを優先強調）
+    // 2. リーチ
     const riichiActs = legal.filter((a) => a.action === "riichi");
     for (const rAct of riichiActs) {
       const b = document.createElement("button");
@@ -310,7 +307,7 @@ export function renderGame(state, uiOptions, handlers) {
       btnBox.appendChild(b);
     }
 
-    // 4. チー（全パターン表示）
+    // 4. チー
     for (const chiAct of legal.filter((a) => a.action === "chi")) {
       const b = document.createElement("button");
       b.className = "btn btn-call";
@@ -318,8 +315,6 @@ export function renderGame(state, uiOptions, handlers) {
       b.onclick = () => handlers.onHumanAction(chiAct);
       btnBox.appendChild(b);
     }
-
-    // ※スルーボタンは廃止（鳴き判定中は手牌全体が黄色枠になり手牌タップでスルー）
   }
 
   renderThoughtCards(state);

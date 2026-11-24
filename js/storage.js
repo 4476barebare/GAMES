@@ -3,8 +3,8 @@
  * 座席別のモデル・APIキー・性格設定および進行中対局（gameState＋ログ）の自動保存・自動復帰管理
  */
 
-const SETTINGS_KEY = "ai_mahjong_arena_settings_4p_v4";
-const SESSION_KEY = "ai_mahjong_arena_saved_match_4p_v4";
+const SETTINGS_KEY = "ai_mahjong_arena_settings_4p_v5";
+const SESSION_KEY = "ai_mahjong_arena_saved_match_4p_v5";
 
 const DEFAULT_SETTINGS = {
   matchMode: "human_vs_ai",
