@@ -1,6 +1,6 @@
 /**
  * ui.js
- * 4人麻雀 1画面固定UI描画（手牌のみ横スクロール・90/270度回転ラベル・副露牌表示・鳴きボタン）
+ * 4人麻雀 UI描画（ツモ牌/最新相手捨て牌の黄色枠・2段階タップ打牌・手牌全体黄色枠スルー・河横の副露表示）
  */
 
 import { getTileVisual, tileIdToLabel } from "./tiles.js";
@@ -20,6 +20,8 @@ function createTileElement(tileId, options = {}) {
   if (options.riichi) div.classList.add("riichi-tile");
   if (options.tsumogiri) div.classList.add("tsumogiri");
   if (options.calledHighlight) div.classList.add("called-highlight");
+  if (options.highlightYellow) div.classList.add("highlight-yellow");
+  if (options.selected) div.classList.add("selected-tile");
 
   if (options.faceDown) {
     div.classList.add("back");
@@ -41,7 +43,10 @@ function createTileElement(tileId, options = {}) {
   }
 
   if (options.onClick) {
-    div.addEventListener("click", () => options.onClick(tileId));
+    div.addEventListener("click", (e) => {
+      e.stopPropagation();
+      options.onClick(tileId);
+    });
   }
 
   return div;
@@ -53,7 +58,6 @@ function renderMelds(containerEl, melds, redDora) {
     const group = document.createElement("div");
     group.className = "meld-group";
     m.tiles.forEach((tid, idx) => {
-      // 暗槓は両端を裏向き表示
       const faceDown = m.type === "ankan" && (idx === 0 || idx === 3);
       const calledHighlight = m.calledTile === tid;
       group.appendChild(
@@ -99,6 +103,11 @@ export function renderGame(state, uiOptions, handlers) {
     banner.textContent = `${WIND_JP[activePlayer.wind]}:${activePlayer.name}`;
   }
 
+  // 直前の相手（Seat 1, 2, 3）の最新捨て牌IDを特定（黄色枠ハイライト用）
+  const lastDiscard = state.turn.lastDiscard;
+  const latestOppDiscardTileId =
+    lastDiscard && lastDiscard.playerIndex !== 0 ? lastDiscard.tileId : null;
+
   // 全4席の情報・河・副露・手牌を描画
   for (let seat = 0; seat < 4; seat++) {
     const p = state.players[seat];
@@ -116,22 +125,29 @@ export function renderGame(state, uiOptions, handlers) {
       thinkEl.classList.toggle("hidden", uiOptions.thinkingSeat !== seat);
     }
 
-    // 河（鳴かれた牌は河から抜いて表示）
+    // 河
     const riverEl = document.getElementById(`river-${seat}`);
     riverEl.innerHTML = "";
-    for (const d of p.discards) {
-      if (d.calledBy !== null) continue;
+    const visibleDiscards = p.discards.filter((d) => d.calledBy === null);
+    visibleDiscards.forEach((d, idx) => {
+      const isLatestOpp =
+        seat !== 0 &&
+        idx === visibleDiscards.length - 1 &&
+        latestOppDiscardTileId !== null &&
+        d.tileId === latestOppDiscardTileId;
+
       riverEl.appendChild(
         createTileElement(d.tileId, {
           variant: "river",
           riichi: d.isRiichi,
           tsumogiri: d.isTsumogiri,
+          highlightYellow: isLatestOpp,
           redDora: red
         })
       );
-    }
+    });
 
-    // 副露（鳴き牌）表示
+    // 副露（鳴き牌）表示（Seat 0 は自分の河の右側へ配置）
     const meldsEl = document.getElementById(`melds-${seat}`);
     if (meldsEl) {
       renderMelds(meldsEl, p.melds, red);
@@ -143,31 +159,57 @@ export function renderGame(state, uiOptions, handlers) {
     handEl.innerHTML = "";
 
     if (seat === 0) {
-      const isHumanTurn =
+      const isHumanDiscardTurn =
         state.status === "playing" &&
         p.control === "human" &&
         state.turn.phase === "discard" &&
         state.turn.playerIndex === 0;
 
+      const isHumanClaimTurn =
+        state.status === "playing" &&
+        p.control === "human" &&
+        state.turn.phase === "claim_check" &&
+        state.turn.pendingClaims.includes(0);
+
+      // 鳴き判定中は手牌スクロール枠全体を黄色い枠で囲み、タップでスルー
+      const scrollWrap = document.getElementById("hand-scroll-wrap");
+      scrollWrap.classList.toggle("through-target", isHumanClaimTurn);
+      scrollWrap.onclick = isHumanClaimTurn ? () => handlers.onHumanPass() : null;
+
       for (const tid of p.hand) {
-        const clickable = isHumanTurn && !p.isRiichi;
+        const clickable = (isHumanDiscardTurn && !p.isRiichi) || isHumanClaimTurn;
+        const isSelected = isHumanDiscardTurn && uiOptions.selectedTileId === tid;
         handEl.appendChild(
           createTileElement(tid, {
             variant: "self",
             clickable,
+            selected: isSelected,
             redDora: red,
-            onClick: clickable ? (id) => handlers.onHumanDiscard(id) : null
+            onClick: isHumanClaimTurn
+              ? () => handlers.onHumanPass()
+              : clickable
+              ? (id) => handlers.onHumanTileTap(id)
+              : null
           })
         );
       }
+
       if (p.drawnTile !== null) {
+        const isSelected = isHumanDiscardTurn && uiOptions.selectedTileId === p.drawnTile;
+        // ツモ牌には常に黄色い枠（highlightYellow）を付与
         handEl.appendChild(
           createTileElement(p.drawnTile, {
             variant: "self",
             drawn: true,
-            clickable: isHumanTurn,
+            clickable: isHumanDiscardTurn || isHumanClaimTurn,
+            highlightYellow: true,
+            selected: isSelected,
             redDora: red,
-            onClick: isHumanTurn ? (id) => handlers.onHumanDiscard(id) : null
+            onClick: isHumanClaimTurn
+              ? () => handlers.onHumanPass()
+              : isHumanDiscardTurn
+              ? (id) => handlers.onHumanTileTap(id)
+              : null
           })
         );
       }
@@ -194,36 +236,52 @@ export function renderGame(state, uiOptions, handlers) {
     }
   }
 
-  // 自分（Seat 0）のシャンテン＆アクションボタン（ツモ・ロン・リーチ・チー・ポン・カン・パス）
+  // 自分（Seat 0）のアクションバー＆全選択肢表示
   const self = state.players[0];
-  const visible = [];
-  state.players.forEach((pl) => {
-    pl.discards.forEach((d) => visible.push(d.tileId));
-    pl.melds.forEach((m) => m.tiles.forEach((t) => visible.push(t)));
-  });
-  state.wall.doraIndicators.forEach((d) => visible.push(d));
+  const isHumanClaimTurn =
+    state.status === "playing" &&
+    self.control === "human" &&
+    state.turn.phase === "claim_check" &&
+    state.turn.pendingClaims.includes(0);
 
-  const cands = analyzeDiscardCandidates(
-    self.hand,
-    self.drawnTile,
-    visible,
-    red,
-    self.melds.length
-  );
-  const bestS = cands.length > 0 ? cands[0].shantenAfter : "-";
+  const actionBarEl = document.getElementById("action-bar");
+  const selfHeaderEl = document.getElementById("seat-header-0");
   const shantenEl = document.getElementById("shanten-info");
-  if (bestS === 0) {
-    shantenEl.textContent = `聴牌 待:${cands[0].waits.map((w) => w.label).join(",")}`;
-  } else {
-    shantenEl.textContent = `${bestS}向聴`;
+  const btnBox = document.getElementById("action-buttons");
+
+  // 鳴き判定中は「南 あなた 31,200」とシャンテン表示を隠し、全鳴き/ロン選択肢をフル幅表示
+  actionBarEl.classList.toggle("claim-mode", isHumanClaimTurn);
+  selfHeaderEl.classList.toggle("hidden", isHumanClaimTurn);
+  shantenEl.classList.toggle("hidden", isHumanClaimTurn);
+
+  if (!isHumanClaimTurn) {
+    const visible = [];
+    state.players.forEach((pl) => {
+      pl.discards.forEach((d) => visible.push(d.tileId));
+      pl.melds.forEach((m) => m.tiles.forEach((t) => visible.push(t)));
+    });
+    state.wall.doraIndicators.forEach((d) => visible.push(d));
+
+    const cands = analyzeDiscardCandidates(
+      self.hand,
+      self.drawnTile,
+      visible,
+      red,
+      self.melds.length
+    );
+    const bestS = cands.length > 0 ? cands[0].shantenAfter : "-";
+    if (bestS === 0) {
+      shantenEl.textContent = `聴牌 待:${cands[0].waits.map((w) => w.label).join(",")}`;
+    } else {
+      shantenEl.textContent = `${bestS}向聴`;
+    }
   }
 
-  const btnBox = document.getElementById("action-buttons");
   btnBox.innerHTML = "";
   if (state.status === "playing" && self.control === "human") {
     const legal = getLegalActions(state, 0);
 
-    // ツモ・ロン
+    // 1. ツモ・ロン
     for (const act of legal.filter((a) => a.action === "tsumo" || a.action === "ron")) {
       const b = document.createElement("button");
       b.className = "btn btn-danger";
@@ -232,8 +290,9 @@ export function renderGame(state, uiOptions, handlers) {
       btnBox.appendChild(b);
     }
 
-    // リーチ
-    for (const rAct of legal.filter((a) => a.action === "riichi")) {
+    // 2. リーチ（1タップ選択中の牌がリーチ可能ならそのボタンを優先強調）
+    const riichiActs = legal.filter((a) => a.action === "riichi");
+    for (const rAct of riichiActs) {
       const b = document.createElement("button");
       b.className = "btn btn-warn";
       b.textContent = `立直(${rAct.tile})`;
@@ -241,7 +300,7 @@ export function renderGame(state, uiOptions, handlers) {
       btnBox.appendChild(b);
     }
 
-    // ポン・大明槓・暗槓・加槓
+    // 3. ポン・大明槓・暗槓・加槓
     for (const cAct of legal.filter((a) => ["pon", "daiminkan", "ankan", "kakan"].includes(a.action))) {
       const labelMap = { pon: "ポン", daiminkan: "カン", ankan: "暗槓", kakan: "加槓" };
       const b = document.createElement("button");
@@ -251,7 +310,7 @@ export function renderGame(state, uiOptions, handlers) {
       btnBox.appendChild(b);
     }
 
-    // チー（複数パターン対応）
+    // 4. チー（全パターン表示）
     for (const chiAct of legal.filter((a) => a.action === "chi")) {
       const b = document.createElement("button");
       b.className = "btn btn-call";
@@ -260,15 +319,7 @@ export function renderGame(state, uiOptions, handlers) {
       btnBox.appendChild(b);
     }
 
-    // 見送り（パス）
-    const passAct = legal.find((a) => a.action === "pass");
-    if (passAct) {
-      const b = document.createElement("button");
-      b.className = "btn btn-secondary";
-      b.textContent = "スルー";
-      b.onclick = () => handlers.onHumanAction(passAct);
-      btnBox.appendChild(b);
-    }
+    // ※スルーボタンは廃止（鳴き判定中は手牌全体が黄色枠になり手牌タップでスルー）
   }
 
   renderThoughtCards(state);

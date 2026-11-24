@@ -6,9 +6,6 @@
 import { tileIdToKind, isRedDora, indicatorToDoraKind, toCounts34 } from "./tiles.js";
 import { calcChiitoiShanten, calcKokushiShanten } from "./shanten.js";
 
-/**
- * 門前部分の牌カウントから「1雀頭＋残り面子(4 - meldCount個)」を全通り分解する
- */
 export function decomposeHandWithMelds(concealedCounts, meldCount = 0) {
   const neededMentsu = 4 - meldCount;
   const results = [];
@@ -71,16 +68,13 @@ function windToKind(windChar) {
   return 30;
 }
 
-/**
- * meldオブジェクト（{ type: "chi"|"pon"|"daiminkan"|"ankan"|"kakan", tiles: [...] }）を面子表現へ変換
- */
 function parseMeldMentsu(meld) {
   const kinds = meld.tiles.map(tileIdToKind).sort((a, b) => a - b);
   if (meld.type === "chi") {
     return { type: "shuntsu", kind: kinds[0], isOpen: true, isKan: false };
   }
   const isKan = meld.type === "daiminkan" || meld.type === "ankan" || meld.type === "kakan";
-  const isOpen = meld.type !== "ankan"; // 暗槓のみ門前扱い
+  const isOpen = meld.type !== "ankan";
   return { type: "koutsu", kind: kinds[0], isOpen, isKan };
 }
 
@@ -106,7 +100,6 @@ export function evaluateWin({
   const isMenzen = melds.every((m) => m.type === "ankan");
   const parsedMelds = melds.map(parseMeldMentsu);
 
-  // 全手牌（門前＋副露の全牌）のカウントとドラ計算
   const allTiles = [...concealed14];
   for (const m of melds) allTiles.push(...m.tiles);
   const allCounts = toCounts34(allTiles);
@@ -128,12 +121,10 @@ export function evaluateWin({
 
   const candidateResults = [];
 
-  // 1. 国士無双（門前かつ副露0のみ）
   if (melds.length === 0 && calcKokushiShanten(concealedCounts) === -1) {
     return buildFinalScore(13, 0, isDealer, isTsumo, [{ name: "国士無双", han: 13 }], true);
   }
 
-  // 2. 七対子（門前かつ副露0のみ）
   if (melds.length === 0 && calcChiitoiShanten(concealedCounts) === -1) {
     const yakus = [{ name: "七対子", han: 2 }];
     if (isRiichi) yakus.push({ name: "リーチ", han: 1 });
@@ -168,7 +159,6 @@ export function evaluateWin({
     candidateResults.push(buildFinalScore(totalHan, 25, isDealer, isTsumo, yakus));
   }
 
-  // 3. 通常手（門前分解＋副露面子を結合して評価）
   const decompositions = decomposeHandWithMelds(concealedCounts, melds.length);
   const seatWindKind = windToKind(seatWind);
   const roundWindKind = windToKind(roundWind);
@@ -186,7 +176,6 @@ export function evaluateWin({
     const shuntsuList = allMentsu.filter((m) => m.type === "shuntsu");
     const shuntsuKinds = shuntsuList.map((m) => m.kind);
 
-    // 役満チェック（大三元・四暗刻・字一色・四槓子）
     const dragonKoutsu = koutsuList.filter((m) => m.kind >= 31 && m.kind <= 33).length;
     if (dragonKoutsu === 3) {
       return buildFinalScore(13, 0, isDealer, isTsumo, [{ name: "大三元", han: 13 }], true);
@@ -213,11 +202,9 @@ export function evaluateWin({
       return buildFinalScore(13, 0, isDealer, isTsumo, [{ name: "字一色", han: 13 }], true);
     }
 
-    // タンヤオ（喰いタンあり）
     const allTanyao = allCounts.every((cnt, k) => cnt === 0 || !isTerminalOrHonor(k));
     if (allTanyao) yakus.push({ name: "断幺九", han: 1 });
 
-    // 役牌
     for (const m of koutsuList) {
       if (m.kind === 31) yakus.push({ name: "役牌:白", han: 1 });
       if (m.kind === 32) yakus.push({ name: "役牌:發", han: 1 });
@@ -226,12 +213,10 @@ export function evaluateWin({
       if (m.kind === roundWindKind) yakus.push({ name: "場風牌", han: 1 });
     }
 
-    // 小三元
     if (dragonKoutsu === 2 && dec.head >= 31 && dec.head <= 33) {
       yakus.push({ name: "小三元", han: 2 });
     }
 
-    // 平和（門前限定）
     const allShuntsu = shuntsuList.length === 4;
     const headIsValue =
       dec.head >= 31 || dec.head === seatWindKind || dec.head === roundWindKind;
@@ -246,7 +231,6 @@ export function evaluateWin({
       if (isRyanmen) yakus.push({ name: "平和", han: 1 });
     }
 
-    // 一盃口・二盃口（門前限定）
     if (isMenzen) {
       const shuntsuMap = new Map();
       for (const sk of shuntsuKinds) shuntsuMap.set(sk, (shuntsuMap.get(sk) || 0) + 1);
@@ -256,12 +240,10 @@ export function evaluateWin({
       else if (iipeikouPairs === 1) yakus.push({ name: "一盃口", han: 1 });
     }
 
-    // 対々和・三暗刻・三槓子
     if (koutsuList.length === 4) yakus.push({ name: "対々和", han: 2 });
     if (concealedKoutsu === 3) yakus.push({ name: "三暗刻", han: 2 });
     if (kanCount === 3) yakus.push({ name: "三槓子", han: 2 });
 
-    // 三色同順（喰い下がり: 門前2翻 / 副露1翻）
     for (let n = 0; n <= 6; n++) {
       if (
         shuntsuKinds.includes(n) &&
@@ -273,7 +255,6 @@ export function evaluateWin({
       }
     }
 
-    // 一気通貫（喰い下がり: 門前2翻 / 副露1翻）
     for (let s = 0; s < 3; s++) {
       const base = s * 9;
       if (
@@ -286,7 +267,6 @@ export function evaluateWin({
       }
     }
 
-    // チャンタ・ジュンチャン（喰い下がり）
     const allMentsuHasTerm = allMentsu.every((m) =>
       m.type === "koutsu"
         ? isTerminalOrHonor(m.kind)
@@ -297,19 +277,16 @@ export function evaluateWin({
       else yakus.push({ name: "混全帯幺九", han: isMenzen ? 2 : 1 });
     }
 
-    // 混老頭
     const allTermHonor = allCounts.every((cnt, k) => cnt === 0 || isTerminalOrHonor(k));
     if (allTermHonor && shuntsuList.length === 0) {
       yakus.push({ name: "混老頭", han: 2 });
     }
 
-    // 混一色・清一色（喰い下がり）
     if (suits.size === 1) {
       if (hasHonor) yakus.push({ name: "混一色", han: isMenzen ? 3 : 2 });
       else yakus.push({ name: "清一色", han: isMenzen ? 6 : 5 });
     }
 
-    // 1翻縛りチェック
     if (yakus.length === 0) continue;
 
     if (doraCount > 0) yakus.push({ name: `ドラ${doraCount}`, han: doraCount });
@@ -318,7 +295,6 @@ export function evaluateWin({
 
     const totalHan = yakus.reduce((s, y) => s + y.han, 0);
 
-    // 符計算（門前/副露対応）
     let fu = 30;
     if (isMenzen) {
       if (allShuntsu && isRyanmen) fu = isTsumo ? 20 : 30;

@@ -300,26 +300,19 @@ function finalizeHanchan(state, reason) {
   return state;
 }
 
-/**
- * チー可能な組み合わせ（consumeラベル配列一覧）を算出
- */
 function getChiOptions(handTileIds, discardedTileId, redDora) {
   const dk = tileIdToKind(discardedTileId);
-  if (dk >= 27) return []; // 字牌はチー不可
-  const suit = Math.floor(dk / 9);
-  const num = dk % 9; // 0..8
+  if (dk >= 27) return [];
+  const num = dk % 9;
   const counts = toCounts34(handTileIds);
   const options = [];
 
-  // パターン1: [dk-2, dk-1] + dk
   if (num >= 2 && counts[dk - 2] > 0 && counts[dk - 1] > 0) {
     options.push(pickBestChiPair(handTileIds, dk - 2, dk - 1, redDora));
   }
-  // パターン2: [dk-1, dk+1] + dk
   if (num >= 1 && num <= 7 && counts[dk - 1] > 0 && counts[dk + 1] > 0) {
     options.push(pickBestChiPair(handTileIds, dk - 1, dk + 1, redDora));
   }
-  // パターン3: [dk+1, dk+2] + dk
   if (num <= 6 && counts[dk + 1] > 0 && counts[dk + 2] > 0) {
     options.push(pickBestChiPair(handTileIds, dk + 1, dk + 2, redDora));
   }
@@ -341,9 +334,7 @@ export function getLegalActions(state, seatIndex) {
   const red = state.config.redDora;
   const isMenzen = p.melds.every((m) => m.type === "ankan");
 
-  // 1. 自分の打牌フェーズ
   if (state.turn.phase === "discard" && state.turn.playerIndex === seatIndex) {
-    // ツモ和了チェック
     if (p.drawnTile !== null) {
       const winCheck = evaluateWin({
         handTileIds: p.hand,
@@ -368,18 +359,12 @@ export function getLegalActions(state, seatIndex) {
     const allHand = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
     const counts = toCounts34(allHand);
 
-    // 暗槓・加槓チェック（残り山あり＆合計カン4回未満＆ツモ直後）
     if (p.drawnTile !== null && state.wall.remaining > 1 && state.wall.kanCount < 4) {
-      // 暗槓（手牌に同種4枚）
       for (let k = 0; k < 34; k++) {
-        if (counts[k] === 4) {
-          // リーチ中は待ちが変わらない暗槓のみ許可する簡易チェック（ここではリーチ中は暗槓不可にして安全化）
-          if (!p.isRiichi) {
-            actions.push({ action: "ankan", tile: kindToLabel(k), kindId: k });
-          }
+        if (counts[k] === 4 && !p.isRiichi) {
+          actions.push({ action: "ankan", tile: kindToLabel(k), kindId: k });
         }
       }
-      // 加槓（既存のポンに対して同種牌を持っている）
       if (!p.isRiichi) {
         for (const m of p.melds) {
           if (m.type === "pon") {
@@ -392,7 +377,6 @@ export function getLegalActions(state, seatIndex) {
       }
     }
 
-    // リーチ中はツモ切りのみ
     if (p.isRiichi) {
       if (p.drawnTile !== null) {
         actions.push({
@@ -404,7 +388,6 @@ export function getLegalActions(state, seatIndex) {
       return actions;
     }
 
-    // 通常打牌＆リーチ宣言候補
     const seenLabels = new Set();
     for (const tid of allHand) {
       const label = tileIdToLabel(tid, red);
@@ -431,7 +414,6 @@ export function getLegalActions(state, seatIndex) {
     return actions;
   }
 
-  // 2. 他家打牌に対するロン・ポン・大明槓・チー判定フェーズ
   if (state.turn.phase === "claim_check" && state.turn.pendingClaims.includes(seatIndex)) {
     const last = state.turn.lastDiscard;
     if (!last) return actions;
@@ -440,7 +422,6 @@ export function getLegalActions(state, seatIndex) {
     const dk = tileIdToKind(last.tileId);
     const isAnyFuriten = p.isFuriten || p.isTempFuriten || p.isRiichiFuriten;
 
-    // ロン判定
     if (!isAnyFuriten) {
       const ronCheck = evaluateWin({
         handTileIds: p.hand,
@@ -461,21 +442,17 @@ export function getLegalActions(state, seatIndex) {
       }
     }
 
-    // 鳴き判定（リーチ中でない＆残り山あり）
     if (state.config.allowCalls && !p.isRiichi && state.wall.remaining > 1) {
       const counts = toCounts34(p.hand);
 
-      // ポン（手牌に同種2枚以上）
       if (counts[dk] >= 2) {
         actions.push({ action: "pon", tile: dLabel });
       }
 
-      // 大明槓（手牌に同種3枚＆合計カン4回未満）
       if (counts[dk] === 3 && state.wall.kanCount < 4) {
         actions.push({ action: "daiminkan", tile: dLabel });
       }
 
-      // チー（打牌者の下家＝(last.playerIndex + 1) % 4 のみ可能）
       const isShimocha = seatIndex === (last.playerIndex + 1) % 4;
       if (isShimocha) {
         const chiPairs = getChiOptions(p.hand, last.tileId, red);
@@ -501,7 +478,6 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
   if (meta.thought !== undefined) p.lastThought = meta.thought;
   if (meta.talk !== undefined) p.lastTalk = meta.talk;
 
-  // A. ツモ和了
   if (actionObj.action === "tsumo") {
     const isDealer = seatIndex === state.round.dealerIndex;
     const winInfo = evaluateWin({
@@ -551,10 +527,11 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     return state;
   }
 
-  // B. 暗槓 / 加槓（自ターン中のカン → 嶺上牌ツモ＆新ドラ表示）
   if (actionObj.action === "ankan" || actionObj.action === "kakan") {
     const targetKind =
-      actionObj.kindId !== undefined ? actionObj.kindId : findTileIdByLabel([...p.hand, p.drawnTile], actionObj.tile, red) >> 2;
+      actionObj.kindId !== undefined
+        ? actionObj.kindId
+        : findTileIdByLabel([...p.hand, p.drawnTile], actionObj.tile, red) >> 2;
     const allHand = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
 
     if (actionObj.action === "ankan") {
@@ -564,7 +541,6 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       p.drawnTile = null;
       p.melds.push({ type: "ankan", tiles: kanTiles, fromSeat: seatIndex, calledTile: null });
     } else {
-      // 加槓
       const meld = p.melds.find((m) => m.type === "pon" && tileIdToKind(m.tiles[0]) === targetKind);
       const addTile = allHand.find((id) => tileIdToKind(id) === targetKind);
       const remain = allHand.filter((id) => id !== addTile);
@@ -574,13 +550,11 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       meld.tiles.push(addTile);
     }
 
-    // 一発消し＆新ドラめくり＆嶺上ツモ
     state.players.forEach((pl) => (pl.isIppatsu = false));
     revealNewDora(state);
     return drawRinshanTile(state, seatIndex);
   }
 
-  // C. 打牌・リーチ宣言
   if (actionObj.action === "discard" || actionObj.action === "riichi") {
     const allHand = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
     const targetId =
@@ -645,7 +619,6 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       talk: p.lastTalk
     });
 
-    // 他家にロン・鳴き（ポン・大明槓・チー）が可能なプレイヤーがいるかチェック
     const claimers = [];
     for (let offset = 1; offset < n; offset++) {
       const otherIdx = (seatIndex + offset) % n;
@@ -670,9 +643,7 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     return advanceToNextDraw(state, (seatIndex + 1) % n);
   }
 
-  // D. 他家打牌への応答（ron / pon / daiminkan / chi / pass）
   if (["ron", "pon", "daiminkan", "chi", "pass"].includes(actionObj.action)) {
-    // ロン可能だったのに見逃した場合はフリテン付与
     const hadRonOption = getLegalActions(prevState, seatIndex).some((a) => a.action === "ron");
     if (hadRonOption && actionObj.action !== "ron") {
       p.isTempFuriten = true;
@@ -682,7 +653,6 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     state.turn.claimResponses[seatIndex] = actionObj;
     state.turn.pendingClaims = state.turn.pendingClaims.filter((idx) => idx !== seatIndex);
 
-    // まだ応答待ちのプレイヤーがいれば待機
     if (state.turn.pendingClaims.length > 0) {
       state.version += 1;
       state.updatedAt = Date.now();
@@ -692,7 +662,6 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     const last = state.turn.lastDiscard;
     const loserIdx = last.playerIndex;
 
-    // 優先度1: ロン（複数人ダブロン・トリロン対応）
     const ronWinners = [];
     for (let offset = 1; offset < n; offset++) {
       const idx = (loserIdx + offset) % n;
@@ -744,7 +713,6 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       return state;
     }
 
-    // 優先度2: ポン または 大明槓
     let ponKanCaller = null;
     for (let offset = 1; offset < n; offset++) {
       const idx = (loserIdx + offset) % n;
@@ -759,33 +727,26 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       return executeCallMeld(state, ponKanCaller.seatIndex, loserIdx, last.tileId, ponKanCaller.resp);
     }
 
-    // 優先度3: チー（下家のみ）
     const shimochaIdx = (loserIdx + 1) % n;
     const chiResp = state.turn.claimResponses[shimochaIdx];
     if (chiResp && chiResp.action === "chi") {
       return executeCallMeld(state, shimochaIdx, loserIdx, last.tileId, chiResp);
     }
 
-    // 全員パス → 次の人のツモへ
     return advanceToNextDraw(state, (loserIdx + 1) % n);
   }
 
   return state;
 }
 
-/**
- * ポン・大明槓・チーの成立処理（河から牌を抜き出し副露面子へ移動・一発消し）
- */
 function executeCallMeld(state, callerIdx, fromSeatIdx, calledTileId, resp) {
   const caller = state.players[callerIdx];
   const fromPlayer = state.players[fromSeatIdx];
   const red = state.config.redDora;
   const dk = tileIdToKind(calledTileId);
 
-  // 全員の一発権利消滅
   state.players.forEach((pl) => (pl.isIppatsu = false));
 
-  // 放銃者の河の最後の牌を「鳴かれた」状態にする
   const lastRiverItem = fromPlayer.discards[fromPlayer.discards.length - 1];
   if (lastRiverItem && lastRiverItem.tileId === calledTileId) {
     lastRiverItem.calledBy = callerIdx;
@@ -800,7 +761,6 @@ function executeCallMeld(state, callerIdx, fromSeatIdx, calledTileId, resp) {
     const consumeLabels = Array.isArray(resp.consume) ? resp.consume : [];
     consumedIds = findMultipleTileIdsByLabels(caller.hand, consumeLabels, red);
     if (!consumedIds || consumedIds.length !== 2) {
-      // 万一指定がずれていた場合は最初の有効チー組み合わせで補完
       const fallbackPair = getChiOptions(caller.hand, calledTileId, red)[0];
       consumedIds = findMultipleTileIdsByLabels(caller.hand, fallbackPair, red);
     }
@@ -821,13 +781,11 @@ function executeCallMeld(state, callerIdx, fromSeatIdx, calledTileId, resp) {
   state.turn.pendingClaims = [];
   state.turn.claimResponses = {};
 
-  // 大明槓の場合は嶺上牌ツモ＋新ドラめくり
   if (resp.action === "daiminkan") {
     revealNewDora(state);
     return drawRinshanTile(state, callerIdx);
   }
 
-  // ポン・チー後はツモなしでそのまま1枚打牌へ
   caller.drawnTile = null;
   state.turn.isRinshanTurn = false;
   state.version += 1;
@@ -909,25 +867,20 @@ function advanceToNextDraw(state, nextSeatIndex) {
   return state;
 }
 
-/**
- * 性格別ロジック搭載の内蔵ルールベースAI（APIキー未入力時にも個性が出る）
- */
 export function chooseFallbackAction(state, seatIndex) {
   const legal = getLegalActions(state, seatIndex);
   const p = state.players[seatIndex];
   const persona = p.aiConfig?.personaId || "digital_balanced";
   const red = state.config.redDora;
 
-  // 和了は全性格共通で即実行
   const tsumo = legal.find((a) => a.action === "tsumo");
   if (tsumo) return tsumo;
   const ron = legal.find((a) => a.action === "ron");
   if (ron) return ron;
 
-  // 1. 鳴き判定フェーズ（claim_check）
   if (state.turn.phase === "claim_check") {
     const passAct = legal.find((a) => a.action === "pass") || legal[0];
-    if (persona === "iron_defense") return passAct; // 鉄壁守備派は鳴かない
+    if (persona === "iron_defense") return passAct;
 
     const currentShanten = calcShanten(toCounts34(p.hand), p.melds.length);
     const last = state.turn.lastDiscard;
@@ -939,15 +892,13 @@ export function chooseFallbackAction(state, seatIndex) {
       (dk === 29 && p.wind === "W") ||
       (dk === 30 && p.wind === "N");
 
-    // ポン判定
     const ponAct = legal.find((a) => a.action === "pon");
     if (ponAct) {
-      if (isYakuhai) return ponAct; // 役牌ポンは積極的に鳴く
+      if (isYakuhai) return ponAct;
       if (persona === "aggressive_riichi" && currentShanten <= 2) return ponAct;
       if (persona === "occult_flow" && currentShanten <= 1) return ponAct;
     }
 
-    // チー判定（超攻撃型・オカルト派でテンパイに近づく場合）
     const chiAct = legal.find((a) => a.action === "chi");
     if (chiAct && (persona === "aggressive_riichi" || persona === "occult_flow") && currentShanten === 1) {
       return chiAct;
@@ -956,7 +907,6 @@ export function chooseFallbackAction(state, seatIndex) {
     return passAct;
   }
 
-  // 2. 打牌フェーズ（性格別の重み付け評価）
   const visible = [];
   state.players.forEach((pl) => {
     pl.discards.forEach((d) => visible.push(d.tileId));
@@ -973,14 +923,12 @@ export function chooseFallbackAction(state, seatIndex) {
   );
   if (candidates.length === 0) return legal[0];
 
-  // 他家にリーチ者がいるか確認
   const riichiOpponents = state.players.filter((pl) => pl.seatIndex !== seatIndex && pl.isRiichi);
   const safeKinds = new Set();
   for (const opp of riichiOpponents) {
     opp.discards.forEach((d) => safeKinds.add(tileIdToKind(d.tileId)));
   }
 
-  // 鉄壁守備派：他家リーチ時に自分がテンパイでなければ現物（安全牌）を最優先で切る
   if (
     riichiOpponents.length > 0 &&
     (persona === "iron_defense" || (persona === "digital_balanced" && candidates[0].shantenAfter >= 2))
@@ -992,20 +940,16 @@ export function chooseFallbackAction(state, seatIndex) {
     }
   }
 
-  // 性格ごとの候補スコアリング
   const doraKinds = new Set(state.wall.doraIndicators.map(indicatorToDoraKind));
   const scored = candidates.map((c) => {
     let score = -c.shantenAfter * 100 + c.acceptanceCount;
     const isDora = doraKinds.has(c.kindId) || c.label.startsWith("0");
 
     if (persona === "occult_flow") {
-      // ドラ・赤牌を切るのを強く嫌う
       if (isDora) score -= 45;
     } else if (persona === "iron_defense") {
-      // 安全牌（他家の捨て牌）を残しやすく、危険な生牌を先に処理
       if (safeKinds.has(c.kindId)) score -= 18;
     } else if (persona === "aggressive_riichi") {
-      // 受け入れ枚数重視
       score += c.acceptanceCount * 0.5;
     }
     return { cand: c, score };
@@ -1014,7 +958,6 @@ export function chooseFallbackAction(state, seatIndex) {
   scored.sort((a, b) => b.score - a.score);
   const best = scored[0].cand;
 
-  // リーチ判断
   const riichiOpt = legal.find((a) => a.action === "riichi" && a.tile === best.label);
   if (riichiOpt) {
     if (persona === "iron_defense" && riichiOpponents.length > 0 && best.acceptanceCount <= 3) {

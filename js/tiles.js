@@ -96,9 +96,6 @@ export function findTileIdByLabel(tileIds, label, redDoraEnabled = true) {
   return found !== undefined ? found : null;
 }
 
-/**
- * 複数枚のラベル配列（チーの消費牌など）に対応する固有tileId配列を取得
- */
 export function findMultipleTileIdsByLabels(tileIds, labels, redDoraEnabled = true) {
   const pool = [...tileIds];
   const picked = [];

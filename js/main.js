@@ -1,6 +1,6 @@
 /**
  * main.js
- * 4人麻雀（半荘・鳴きあり・座席別APIキー）統括
+ * 4人麻雀（半荘・鳴きあり・2段階タップ打牌・手牌黄色枠スルー）統括
  */
 
 import { tileIdToLabel } from "./tiles.js";
@@ -35,6 +35,7 @@ let baseRulesMd = "";
 let personas = [];
 let openHand = false;
 let thinkingSeat = null;
+let selectedTileId = null; // 2段階タップ打牌用：1回目タップで選択中のtileId
 let isProcessing = false;
 let loopToken = 0;
 const syncAdapter = new LocalSyncAdapter();
@@ -84,6 +85,7 @@ async function startNewMatch() {
   loopToken += 1;
   isProcessing = false;
   thinkingSeat = null;
+  selectedTileId = null;
   clearMatchSession();
 
   const resModal = document.getElementById("result-modal");
@@ -145,13 +147,26 @@ async function restoreOrStartMatch() {
 function refreshUI() {
   renderGame(
     gameState,
-    { openHand, thinkingSeat },
+    { openHand, thinkingSeat, selectedTileId },
     {
-      onHumanDiscard: (tileId) => {
-        const label = tileIdToLabel(tileId, gameState.config.redDora);
-        handlePlayerAction(0, { action: "discard", tile: label, tileId }, {}, loopToken);
+      // 2段階タップ打牌：1回目タップで選択枠移動、2回目同じ牌タップで打牌確定
+      onHumanTileTap: (tileId) => {
+        if (selectedTileId === tileId) {
+          selectedTileId = null;
+          const label = tileIdToLabel(tileId, gameState.config.redDora);
+          handlePlayerAction(0, { action: "discard", tile: label, tileId }, {}, loopToken);
+        } else {
+          selectedTileId = tileId;
+          refreshUI();
+        }
+      },
+      // 鳴き判定中に手牌（黄色枠）タップでスルー
+      onHumanPass: () => {
+        selectedTileId = null;
+        handlePlayerAction(0, { action: "pass", tile: "" }, {}, loopToken);
       },
       onHumanAction: (actionObj) => {
+        selectedTileId = null;
         handlePlayerAction(0, actionObj, {}, loopToken);
       }
     }
@@ -162,6 +177,7 @@ async function handlePlayerAction(seatIndex, actionObj, meta = {}, token = loopT
   if (token !== loopToken) return;
   if (isProcessing || gameState.status !== "playing") return;
   isProcessing = true;
+  selectedTileId = null;
 
   try {
     const actor = gameState.players[seatIndex];
@@ -218,7 +234,9 @@ async function stepGameLoop(token) {
   refreshUI();
 
   const aiPlayer = gameState.players[targetSeat];
-  const hasApi = Boolean((aiPlayer.aiConfig?.apiKey || settings.globalApiKey || "").trim()) && aiPlayer.aiConfig?.model !== "builtin";
+  const hasApi =
+    Boolean((aiPlayer.aiConfig?.apiKey || settings.globalApiKey || "").trim()) &&
+    aiPlayer.aiConfig?.model !== "builtin";
   const waitMs = hasApi ? 300 : 220;
   await new Promise((r) => setTimeout(r, waitMs));
   if (token !== loopToken) return;
@@ -321,7 +339,6 @@ function bindEvents() {
     sidePanel.classList.remove("open");
   });
 
-  // 設定モーダル
   const settingsModal = document.getElementById("settings-modal");
   document.getElementById("btn-settings").addEventListener("click", () => {
     const s = loadSettings();
@@ -353,9 +370,9 @@ function bindEvents() {
     await startNewMatch();
   });
 
-  // 次局または最終精算へ
   document.getElementById("btn-next-round").addEventListener("click", async () => {
     document.getElementById("result-modal").close();
+    selectedTileId = null;
     gameState = advanceNextRoundOrFinish(gameState);
 
     if (gameState.status === "match_end") {
@@ -378,7 +395,6 @@ function bindEvents() {
     await startNewMatch();
   });
 
-  // 盤面MD確認モーダル
   const mdModal = document.getElementById("md-modal");
   document.getElementById("btn-show-md").addEventListener("click", () => {
     const targetSeat = gameState.turn.playerIndex;
