@@ -19,12 +19,12 @@
 
   --self-tile-w: 34px;
   --self-tile-h: 48px;
-  --river-tile-w: clamp(18px, 4.3vw, 26px);
-  --river-tile-h: clamp(24px, 5.6vw, 35px);
-  --opp-tile-w: clamp(15px, 3.6vw, 22px);
-  --opp-tile-h: clamp(21px, 4.8vw, 30px);
-  --meld-tile-w: clamp(16px, 3.6vw, 22px);
-  --meld-tile-h: clamp(22px, 4.8vw, 30px);
+  --river-tile-w: clamp(17px, 4.1vw, 25px);
+  --river-tile-h: clamp(23px, 5.4vw, 34px);
+  --opp-tile-w: clamp(14px, 3.4vw, 21px);
+  --opp-tile-h: clamp(20px, 4.6vw, 29px);
+  --meld-tile-w: clamp(14px, 3.2vw, 20px);
+  --meld-tile-h: clamp(19px, 4.3vw, 27px);
 }
 
 html, body {
@@ -40,7 +40,7 @@ html, body {
   flex-direction: column;
 }
 
-/* トップバー（横スクロール復活） */
+/* トップバー（横スクロール対応） */
 .topbar {
   flex: 0 0 auto;
   width: 100%;
@@ -138,6 +138,7 @@ html, body {
   min-width: 0;
   overflow: hidden;
   gap: 3px;
+  touch-action: pan-y; /* 卓全体の横スワイプをJSで捕捉して手牌をスクロール */
 }
 
 /* 座席共通バッジ */
@@ -145,8 +146,8 @@ html, body {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 0.75rem;
-  background: rgba(15, 23, 42, 0.72);
+  font-size: 0.74rem;
+  background: rgba(15, 23, 42, 0.74);
   padding: 2px 7px;
   border-radius: 5px;
   border: 1.5px solid transparent;
@@ -165,7 +166,7 @@ html, body {
   font-weight: 800;
   padding: 0 4px;
   border-radius: 3px;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
 }
 
 .seat-name {
@@ -210,20 +211,12 @@ html, body {
   gap: 2px;
 }
 
-.seat-top-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-/* 中段：左(上家 90度回転) + 中央(4家の河＆HUD) + 右(下家 270度回転) */
+/* 中段：左(上家 90度回転) + 中央(4家の河＆各家の副露＆HUD) + 右(下家 270度回転) */
 .table-middle {
   flex: 1 1 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: 34px 1fr 34px;
+  grid-template-columns: 30px 1fr 30px;
   gap: 2px;
   align-items: center;
   overflow: hidden;
@@ -235,7 +228,6 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   position: relative;
   overflow: visible;
 }
@@ -244,7 +236,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   background: rgba(15, 23, 42, 0.78);
   padding: 2px 7px;
   border-radius: 5px;
@@ -255,16 +247,9 @@ html, body {
 
 .rot-90 { transform: rotate(90deg); }
 .rot-270 { transform: rotate(270deg); }
-.rot-label .seat-name { max-width: 88px; }
+.rot-label .seat-name { max-width: 86px; }
 
-.melds-side {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: center;
-}
-
-/* 中央：4家の河＋センターHUD */
+/* 中央：4家の河＋各家の副露＋センターHUD */
 .center-square {
   height: 100%;
   min-height: 0;
@@ -295,13 +280,13 @@ html, body {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  min-width: 92px;
+  min-width: 90px;
   box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.45);
 }
 
 .hud-round {
   font-weight: 800;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--gold);
   white-space: nowrap;
 }
@@ -309,7 +294,7 @@ html, body {
 .hud-meta {
   display: flex;
   gap: 6px;
-  font-size: 0.66rem;
+  font-size: 0.65rem;
   color: #cbd5e1;
   white-space: nowrap;
 }
@@ -330,7 +315,7 @@ html, body {
   font-weight: 700;
   color: var(--accent);
   white-space: nowrap;
-  max-width: 96px;
+  max-width: 94px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -372,27 +357,77 @@ html, body {
   gap: 2px;
 }
 
-.center-row > .river-side:first-child { justify-self: end; }
-.center-row > .river-side:last-child { justify-self: start; }
+/* --- 4家すべての河の横に揃えた鳴き牌（副露）レイアウト --- */
 
-/* 自分の河＋右側の副露（鳴き牌）横並びコンテナ */
+/* 対面（上）：左側に270度回転で対面の副露（対面視点の右手側）、右側に河 */
+.top-river-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+}
+
+.melds-top-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  max-height: calc(var(--river-tile-h) * 3 + 10px);
+  overflow: hidden;
+}
+
+/* 自分（下）：左側に河、右側に自分の副露（自視点の右手側） */
 .bottom-river-row {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
-  position: relative;
 }
 
 .melds-self-side {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   align-items: flex-start;
   justify-content: flex-end;
   max-height: calc(var(--river-tile-h) * 3 + 10px);
-  overflow-y: auto;
+  overflow: hidden;
+}
+
+/* 左右（上家・下家）：河のすぐ上下に副露をコンパクトに並べる */
+.side-river-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 100%;
+}
+
+.side-river-left {
+  justify-self: end;
+  align-items: flex-end;
+}
+
+.side-river-right {
+  justify-self: start;
+  align-items: flex-start;
+}
+
+.melds-side-horiz {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: calc(var(--river-tile-w) * 3 + 18px);
+}
+
+.meld-group {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  background: rgba(0, 0, 0, 0.34);
+  padding: 1.5px;
+  border-radius: 3px;
 }
 
 /* 下：自分（Seat 0） */
@@ -436,7 +471,7 @@ html, body {
   flex-shrink: 0;
 }
 
-/* 自分の手牌（横スクロール可能・鳴き牌は河の横へ移動済み） */
+/* 自分の手牌（横スクロール可能・卓全体スワイプとも連動） */
 .self-tiles-container {
   display: flex;
   align-items: flex-end;
@@ -457,7 +492,6 @@ html, body {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-/* 鳴き判定中：手牌エリア全体を黄色い枠で囲み、タップでスルーになることを明示 */
 .hand-scroll-wrap.through-target {
   border-color: var(--gold);
   background: rgba(250, 204, 21, 0.12);
@@ -488,23 +522,6 @@ html, body {
   height: var(--opp-tile-h);
 }
 
-/* 副露（鳴き牌）表示グループ */
-.melds-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.meld-group {
-  display: flex;
-  align-items: flex-end;
-  gap: 1px;
-  background: rgba(0, 0, 0, 0.32);
-  padding: 2px;
-  border-radius: 4px;
-}
-
 /* 牌スタイル */
 .tile {
   width: var(--self-tile-w);
@@ -529,21 +546,21 @@ html, body {
 .tile.river-tile {
   width: var(--river-tile-w);
   height: var(--river-tile-h);
-  font-size: clamp(0.58rem, 1.4vw, 0.74rem);
+  font-size: clamp(0.56rem, 1.35vw, 0.72rem);
   border-bottom-width: 2px;
 }
 
 .tile.opp-tile {
   width: var(--opp-tile-w);
   height: var(--opp-tile-h);
-  font-size: clamp(0.52rem, 1.1vw, 0.66rem);
+  font-size: clamp(0.5rem, 1.05vw, 0.64rem);
   border-bottom-width: 2px;
 }
 
 .tile.meld-tile {
   width: var(--meld-tile-w);
   height: var(--meld-tile-h);
-  font-size: clamp(0.52rem, 1.1vw, 0.66rem);
+  font-size: clamp(0.48rem, 1.0vw, 0.62rem);
   border-bottom-width: 2px;
 }
 
@@ -562,13 +579,11 @@ html, body {
   margin-left: 8px;
 }
 
-/* ツモ牌・最新相手捨て牌・1タップ選択中牌の黄色枠ハイライト */
 .tile.highlight-yellow {
   border: 2px solid var(--gold) !important;
   box-shadow: 0 0 8px rgba(250, 204, 21, 0.85);
 }
 
-/* 1回タップして選択中の牌（少し浮き上がって黄色枠が付く） */
 .tile.selected-tile {
   transform: translateY(-7px);
   border: 2px solid var(--gold) !important;
