@@ -1,10 +1,9 @@
 /**
  * engine.js
- * gameState の初期化・合法手生成・アクション適用（純粋関数設計・2人/4人拡張互換）
+ * 4人麻雀（半荘戦）ゲームエンジン・半荘進行・飛び判定・最終精算（ウマ10-30 / オカ+20）
  */
 
 import {
-  tileIdToKind,
   tileIdToLabel,
   sortTileIds,
   toCounts34,
@@ -14,6 +13,9 @@ import { calcShanten, analyzeDiscardCandidates } from "./shanten.js";
 import { evaluateWin, checkFuriten } from "./score.js";
 
 const WINDS = ["E", "S", "W", "N"];
+const UMA_TABLE = [30, 10, -10, -30]; // 10-30（ワンスリー）
+const OKA_BONUS = 20; // 25,000点持ち・30,000点返し
+const RETURN_POINTS = 30000;
 
 function shuffle(array) {
   const arr = [...array];
@@ -24,17 +26,11 @@ function shuffle(array) {
   return arr;
 }
 
-function buildWall(tileSet) {
+function buildWall() {
   const ids = [];
-  for (let id = 0; id < 136; id++) {
-    if (tileSet === "2p_compact") {
-      const k = tileIdToKind(id);
-      if (k >= 1 && k <= 7) continue; // 2m..8m を除外
-    }
-    ids.push(id);
-  }
+  for (let id = 0; id < 136; id++) ids.push(id);
   const shuffled = shuffle(ids);
-  const dead = shuffled.splice(0, 14); // 王牌14枚
+  const dead = shuffled.splice(0, 14);
   return {
     live: shuffled,
     dead,
@@ -44,35 +40,33 @@ function buildWall(tileSet) {
   };
 }
 
-/**
- * 新規マッチの初期 gameState を生成（players配列長により2人/4人自動対応）
- */
 export function createMatchState(options = {}) {
-  const mode = options.mode || "2p";
-  const maxPlayers = mode === "4p" ? 4 : 2;
-  const playerConfigs = options.players || [
+  const defaultPlayers = [
     { id: "p0", name: "あなた", control: "human", aiConfig: null },
     {
       id: "p1",
-      name: "Gemini",
+      name: "下家AI",
       control: "ai",
-      aiConfig: {
-        provider: "gemini",
-        model: "gemini-4-hydrogen",
-        personaId: "digital_balanced",
-        customPrompt: ""
-      }
+      aiConfig: { provider: "gemini", model: "builtin", personaId: "digital_balanced", customPrompt: "" }
+    },
+    {
+      id: "p2",
+      name: "対面AI",
+      control: "ai",
+      aiConfig: { provider: "gemini", model: "builtin", personaId: "aggressive_riichi", customPrompt: "" }
+    },
+    {
+      id: "p3",
+      name: "上家AI",
+      control: "ai",
+      aiConfig: { provider: "gemini", model: "builtin", personaId: "iron_defense", customPrompt: "" }
     }
   ];
 
+  const playerConfigs = options.players || defaultPlayers;
   const players = [];
-  for (let i = 0; i < maxPlayers; i++) {
-    const cfg = playerConfigs[i] || {
-      id: `p${i}`,
-      name: `AI-${i + 1}`,
-      control: "ai",
-      aiConfig: { provider: "gemini", model: "gemini-4-hydrogen", personaId: "digital_balanced", customPrompt: "" }
-    };
+  for (let i = 0; i < 4; i++) {
+    const cfg = playerConfigs[i] || defaultPlayers[i];
     players.push({
       seatIndex: i,
       wind: WINDS[i],
@@ -89,70 +83,68 @@ export function createMatchState(options = {}) {
       riichiTurn: null,
       isIppatsu: false,
       isFuriten: false,
+      isTempFuriten: false,
+      isRiichiFuriten: false,
       lastThought: "",
       lastTalk: ""
     });
   }
 
   const state = {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     roomId: options.roomId || null,
     version: 1,
     updatedAt: Date.now(),
     status: "playing",
     config: {
-      mode,
-      maxPlayers,
-      roundType: "east",
-      tileSet: options.tileSet || "full136",
-      redDora: options.redDora !== false,
+      mode: "4p",
+      maxPlayers: 4,
+      roundType: "hanchan",
+      tileSet: "full136",
+      redDora: true,
       openTanyao: true,
       allowCalls: false,
-      initialPoints: options.initialPoints || 25000
+      initialPoints: 25000,
+      returnPoints: RETURN_POINTS
     },
     round: {
       wind: "E",
       number: 1,
       honba: 0,
       riichiSticks: 0,
-      dealerIndex: 0
+      dealerIndex: 0,
+      roundsPlayed: 0
     },
     turn: {
       playerIndex: 0,
       phase: "discard",
       turnCount: 1,
       lastDiscard: null,
-      pendingClaims: []
+      pendingClaims: [],
+      claimResponses: {}
     },
     wall: null,
     players,
     lastResult: null,
+    finalSettlement: null,
     history: []
   };
 
-  return startNewRound(state, 0, false);
+  return dealRound(state);
 }
 
 /**
- * 新しい局（配牌＋親の第一ツモ）を開始する
+ * 現在の round 情報に従って配牌と親の第一ツモを行う
  */
-export function startNewRound(prevState, dealerIndex = 0, keepHonba = false) {
+function dealRound(prevState) {
   const state = structuredClone(prevState);
+  const dealerIndex = state.round.dealerIndex;
   const n = state.players.length;
 
-  state.wall = buildWall(state.config.tileSet);
+  state.wall = buildWall();
   state.status = "playing";
   state.lastResult = null;
-  state.round.dealerIndex = dealerIndex;
-  if (!keepHonba) {
-    // 親流れ時は局進行
-    if (prevState.lastResult) {
-      state.round.number += 1;
-      state.round.honba = 0;
-    }
-  } else {
-    state.round.honba += 1;
-  }
+  state.round.roundsPlayed += 1;
 
   for (let i = 0; i < n; i++) {
     const p = state.players[i];
@@ -165,11 +157,12 @@ export function startNewRound(prevState, dealerIndex = 0, keepHonba = false) {
     p.riichiTurn = null;
     p.isIppatsu = false;
     p.isFuriten = false;
+    p.isTempFuriten = false;
+    p.isRiichiFuriten = false;
     p.lastThought = "";
     p.lastTalk = "";
   }
 
-  // 親の第一ツモ
   const dealer = state.players[dealerIndex];
   dealer.drawnTile = state.wall.live.shift();
   state.wall.remaining = state.wall.live.length;
@@ -179,7 +172,8 @@ export function startNewRound(prevState, dealerIndex = 0, keepHonba = false) {
     phase: "discard",
     turnCount: 1,
     lastDiscard: null,
-    pendingClaims: []
+    pendingClaims: [],
+    claimResponses: {}
   };
   state.version += 1;
   state.updatedAt = Date.now();
@@ -187,8 +181,135 @@ export function startNewRound(prevState, dealerIndex = 0, keepHonba = false) {
 }
 
 /**
- * 指定座席の現在フェーズにおける合法アクション一覧を返す
+ * 局結果を受けて次の局へ進むか、半荘終了（最終精算）へ遷移する
  */
+export function advanceNextRoundOrFinish(prevState) {
+  const state = structuredClone(prevState);
+  const res = state.lastResult;
+  if (!res) return state;
+
+  // 1. 飛び終了チェック（持ち点0未満のプレイヤーが存在）
+  const bustedPlayer = state.players.find((p) => p.points < 0);
+  if (bustedPlayer) {
+    return finalizeHanchan(state, `${bustedPlayer.name} の飛び（トビ）により半荘終了`);
+  }
+
+  const dealerIdx = state.round.dealerIndex;
+  const isAllLast = state.round.wind === "S" && state.round.number === 4;
+
+  // 連荘判定
+  let dealerContinues = false;
+  let nextHonba = state.round.honba;
+
+  if (res.type === "tsumo" || res.type === "ron") {
+    const dealerWon = res.winners.some((w) => w.seatIndex === dealerIdx);
+    if (dealerWon) {
+      // オーラスで親がトップなら上がりやめ
+      if (isAllLast && isSeatTop(state, dealerIdx)) {
+        return finalizeHanchan(state, "オーラス親のトップ上がりやめにより半荘終了");
+      }
+      dealerContinues = true;
+      nextHonba += 1;
+    } else {
+      dealerContinues = false;
+      nextHonba = 0;
+    }
+  } else if (res.type === "draw") {
+    const dealerTenpai = res.tenpaiSeats && res.tenpaiSeats.includes(dealerIdx);
+    nextHonba += 1;
+    if (dealerTenpai) {
+      // オーラスで親がノーテン罰符込みでトップなら聴牌やめ
+      if (isAllLast && isSeatTop(state, dealerIdx)) {
+        return finalizeHanchan(state, "オーラス親のトップ聴牌やめにより半荘終了");
+      }
+      dealerContinues = true;
+    } else {
+      dealerContinues = false;
+    }
+  }
+
+  if (dealerContinues) {
+    state.round.honba = nextHonba;
+    return dealRound(state);
+  }
+
+  // 親流れ：オーラスなら半荘終了
+  if (isAllLast) {
+    return finalizeHanchan(state, "南4局（オーラス）終了により半荘完結");
+  }
+
+  // 局を1つ進める
+  state.round.dealerIndex = (dealerIdx + 1) % 4;
+  state.round.honba = nextHonba;
+  if (state.round.number < 4) {
+    state.round.number += 1;
+  } else {
+    state.round.wind = "S";
+    state.round.number = 1;
+  }
+
+  return dealRound(state);
+}
+
+function isSeatTop(state, seatIndex) {
+  const targetPts = state.players[seatIndex].points;
+  for (const p of state.players) {
+    if (p.seatIndex === seatIndex) continue;
+    if (p.points > targetPts) return false;
+    if (p.points === targetPts && p.seatIndex < seatIndex) return false; // 起家優先
+  }
+  return true;
+}
+
+/**
+ * 半荘終了・最終精算（残供託トップ総取り＋ウマ10-30＋オカ+20）
+ */
+function finalizeHanchan(state, reason) {
+  // 順位ソート（持ち点降順、同点は起家＝seatIndex昇順）
+  const ranked = [...state.players].sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    return a.seatIndex - b.seatIndex;
+  });
+
+  // 残っている供託リーチ棒はトップが総取り
+  const leftoverRiichi = state.round.riichiSticks * 1000;
+  if (leftoverRiichi > 0) {
+    const topSeat = ranked[0].seatIndex;
+    state.players[topSeat].points += leftoverRiichi;
+    ranked[0].points += leftoverRiichi;
+    state.round.riichiSticks = 0;
+  }
+
+  const standings = ranked.map((p, idx) => {
+    const rank = idx + 1;
+    const rawDiffPt = (p.points - RETURN_POINTS) / 1000;
+    const uma = UMA_TABLE[idx];
+    const oka = rank === 1 ? OKA_BONUS : 0;
+    const finalScore = Math.round((rawDiffPt + uma + oka) * 10) / 10;
+    return {
+      rank,
+      seatIndex: p.seatIndex,
+      name: p.name,
+      points: p.points,
+      rawDiffPt: Math.round(rawDiffPt * 10) / 10,
+      uma,
+      oka,
+      finalScore
+    };
+  });
+
+  state.status = "match_end";
+  state.finalSettlement = {
+    reason,
+    roundsPlayed: state.round.roundsPlayed,
+    leftoverRiichiAwarded: leftoverRiichi,
+    standings
+  };
+  state.version += 1;
+  state.updatedAt = Date.now();
+  return state;
+}
+
 export function getLegalActions(state, seatIndex) {
   const actions = [];
   if (state.status !== "playing") return actions;
@@ -198,7 +319,6 @@ export function getLegalActions(state, seatIndex) {
 
   // 1. 自分の打牌フェーズ
   if (state.turn.phase === "discard" && state.turn.playerIndex === seatIndex) {
-    // ツモ和了チェック
     if (p.drawnTile !== null) {
       const winCheck = evaluateWin({
         handTileIds: p.hand,
@@ -218,7 +338,6 @@ export function getLegalActions(state, seatIndex) {
       }
     }
 
-    // リーチ中はツモ切りのみ合法
     if (p.isRiichi) {
       if (p.drawnTile !== null) {
         actions.push({
@@ -230,7 +349,6 @@ export function getLegalActions(state, seatIndex) {
       return actions;
     }
 
-    // 通常打牌＆リーチ宣言候補
     const all14 = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
     const seenLabels = new Set();
 
@@ -241,11 +359,10 @@ export function getLegalActions(state, seatIndex) {
 
       actions.push({ action: "discard", tile: label, tileId: tid });
 
-      // リーチ宣言可否（門前・持ち点1000以上・残り山4枚以上・切った後シャンテン0）
       if (
         p.melds.length === 0 &&
         p.points >= 1000 &&
-        state.wall.remaining >= state.players.length
+        state.wall.remaining >= 4
       ) {
         const remain13 = [];
         let removed = false;
@@ -267,7 +384,8 @@ export function getLegalActions(state, seatIndex) {
   // 2. 他家の打牌に対するロン判定フェーズ
   if (state.turn.phase === "claim_check" && state.turn.pendingClaims.includes(seatIndex)) {
     const last = state.turn.lastDiscard;
-    if (last && !p.isFuriten) {
+    const isAnyFuriten = p.isFuriten || p.isTempFuriten || p.isRiichiFuriten;
+    if (last && !isAnyFuriten) {
       const ronCheck = evaluateWin({
         handTileIds: p.hand,
         winTileId: last.tileId,
@@ -292,9 +410,6 @@ export function getLegalActions(state, seatIndex) {
   return actions;
 }
 
-/**
- * アクションを盤面に適用し、新しい gameState を返す
- */
 export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
   const state = structuredClone(prevState);
   const p = state.players[seatIndex];
@@ -304,37 +419,42 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
   if (meta.thought !== undefined) p.lastThought = meta.thought;
   if (meta.talk !== undefined) p.lastTalk = meta.talk;
 
-  // A. ツモ和了
+  // A. ツモ和了（4人打ちの正確な親子支払い計算）
   if (actionObj.action === "tsumo") {
+    const isDealer = seatIndex === state.round.dealerIndex;
     const winInfo = evaluateWin({
       handTileIds: p.hand,
       winTileId: p.drawnTile,
       isTsumo: true,
       isRiichi: p.isRiichi,
       isIppatsu: p.isIppatsu,
-      isDealer: seatIndex === state.round.dealerIndex,
+      isDealer,
       seatWind: p.wind,
       roundWind: state.round.wind,
       doraIndicators: state.wall.doraIndicators,
       uraDoraIndicators: state.wall.uraDoraIndicators,
       redDoraEnabled: red
     });
-    const bonus = state.round.riichiSticks * 1000 + state.round.honba * 300;
-    const totalGain = winInfo.points + bonus;
+
+    const riichiBonus = state.round.riichiSticks * 1000;
+    const honbaPerPlayer = state.round.honba * 100;
     const deltas = new Array(n).fill(0);
-    const share = Math.ceil(winInfo.points / (n - 1) / 100) * 100;
+    let totalCollected = 0;
 
     for (let i = 0; i < n; i++) {
-      if (i === seatIndex) {
-        deltas[i] = totalGain;
-        state.players[i].points += totalGain;
-      } else {
-        const loss = share + Math.floor((state.round.honba * 300) / (n - 1));
-        deltas[i] = -loss;
-        state.players[i].points -= loss;
-      }
+      if (i === seatIndex) continue;
+      const basePay =
+        i === state.round.dealerIndex
+          ? winInfo.tsumoPay.dealerPay
+          : winInfo.tsumoPay.childPay;
+      const pay = basePay + honbaPerPlayer;
+      deltas[i] = -pay;
+      state.players[i].points -= pay;
+      totalCollected += pay;
     }
 
+    deltas[seatIndex] = totalCollected + riichiBonus;
+    state.players[seatIndex].points += deltas[seatIndex];
     state.round.riichiSticks = 0;
     state.status = "round_end";
     state.lastResult = {
@@ -347,7 +467,7 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     return state;
   }
 
-  // B. 打牌 または リーチ宣言
+  // B. 打牌・リーチ宣言
   if (actionObj.action === "discard" || actionObj.action === "riichi") {
     const all14 = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
     const targetId =
@@ -362,6 +482,9 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     const isTsumogiri = p.drawnTile !== null && targetId === p.drawnTile;
     const isRiichiDeclare = actionObj.action === "riichi" && !p.isRiichi;
 
+    // 自分の打牌により同巡内フリテンは解除
+    p.isTempFuriten = false;
+
     if (isRiichiDeclare) {
       p.isRiichi = true;
       p.riichiTurn = state.turn.turnCount;
@@ -372,7 +495,6 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       p.isIppatsu = false;
     }
 
-    // 手牌から対象牌を除去して理牌
     const remain13 = [];
     let removed = false;
     for (const x of all14) {
@@ -410,12 +532,12 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       talk: p.lastTalk
     });
 
-    // 他家にロン可能なプレイヤーがいるかチェック
+    // 他家（上家優先順）にロン可能なプレイヤーがいるか判定
     const ronClaimers = [];
     for (let offset = 1; offset < n; offset++) {
       const otherIdx = (seatIndex + offset) % n;
       const other = state.players[otherIdx];
-      if (other.isFuriten) continue;
+      if (other.isFuriten || other.isTempFuriten || other.isRiichiFuriten) continue;
       const ronCheck = evaluateWin({
         handTileIds: other.hand,
         winTileId: targetId,
@@ -435,6 +557,7 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     if (ronClaimers.length > 0) {
       state.turn.phase = "claim_check";
       state.turn.pendingClaims = ronClaimers;
+      state.turn.claimResponses = {};
       state.version += 1;
       state.updatedAt = Date.now();
       return state;
@@ -443,65 +566,89 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     return advanceToNextDraw(state, (seatIndex + 1) % n);
   }
 
-  // C. ロン和了
-  if (actionObj.action === "ron") {
+  // C. ロン / パス応答（複数人ダブロン・トリロン対応）
+  if (actionObj.action === "ron" || actionObj.action === "pass") {
+    if (actionObj.action === "pass") {
+      // 見逃しによるフリテン付与
+      p.isTempFuriten = true;
+      if (p.isRiichi) p.isRiichiFuriten = true;
+    }
+
+    state.turn.claimResponses[seatIndex] = actionObj.action;
+    state.turn.pendingClaims = state.turn.pendingClaims.filter((idx) => idx !== seatIndex);
+
+    // まだ応答待ちの他家がいる場合は継続
+    if (state.turn.pendingClaims.length > 0) {
+      state.version += 1;
+      state.updatedAt = Date.now();
+      return state;
+    }
+
+    // 全員の応答が揃った：放銃者から上家順にロン宣言者を並べる
     const last = state.turn.lastDiscard;
     const loserIdx = last.playerIndex;
-    const winInfo = evaluateWin({
-      handTileIds: p.hand,
-      winTileId: last.tileId,
-      isTsumo: false,
-      isRiichi: p.isRiichi,
-      isIppatsu: p.isIppatsu,
-      isDealer: seatIndex === state.round.dealerIndex,
-      seatWind: p.wind,
-      roundWind: state.round.wind,
-      doraIndicators: state.wall.doraIndicators,
-      uraDoraIndicators: state.wall.uraDoraIndicators,
-      redDoraEnabled: red
-    });
-
-    const bonus = state.round.riichiSticks * 1000 + state.round.honba * 300;
-    const deltas = new Array(n).fill(0);
-    deltas[seatIndex] = winInfo.points + bonus;
-    deltas[loserIdx] = -(winInfo.points + state.round.honba * 300);
-
-    state.players[seatIndex].points += deltas[seatIndex];
-    state.players[loserIdx].points += deltas[loserIdx];
-    state.round.riichiSticks = 0;
-    state.status = "round_end";
-    state.lastResult = {
-      type: "ron",
-      winners: [{ seatIndex, name: p.name, winInfo, winTileId: last.tileId }],
-      loserIndex: loserIdx,
-      scoreDeltas: deltas
-    };
-    state.version += 1;
-    state.updatedAt = Date.now();
-    return state;
-  }
-
-  // D. ロン見送り（パス）
-  if (actionObj.action === "pass") {
-    state.turn.pendingClaims = state.turn.pendingClaims.filter((idx) => idx !== seatIndex);
-    if (state.turn.pendingClaims.length === 0) {
-      const nextSeat = (state.turn.lastDiscard.playerIndex + 1) % n;
-      return advanceToNextDraw(state, nextSeat);
+    const ronWinners = [];
+    for (let offset = 1; offset < n; offset++) {
+      const idx = (loserIdx + offset) % n;
+      if (state.turn.claimResponses[idx] === "ron") {
+        ronWinners.push(idx);
+      }
     }
-    state.version += 1;
-    state.updatedAt = Date.now();
-    return state;
+
+    if (ronWinners.length > 0) {
+      const deltas = new Array(n).fill(0);
+      const winnersDetail = [];
+
+      ronWinners.forEach((wIdx, order) => {
+        const wp = state.players[wIdx];
+        const winInfo = evaluateWin({
+          handTileIds: wp.hand,
+          winTileId: last.tileId,
+          isTsumo: false,
+          isRiichi: wp.isRiichi,
+          isIppatsu: wp.isIppatsu,
+          isDealer: wIdx === state.round.dealerIndex,
+          seatWind: wp.wind,
+          roundWind: state.round.wind,
+          doraIndicators: state.wall.doraIndicators,
+          uraDoraIndicators: state.wall.uraDoraIndicators,
+          redDoraEnabled: red
+        });
+        // 供託・本場は頭ハネ（放銃者から最も近い上家のみ取得）
+        const riichiBonus = order === 0 ? state.round.riichiSticks * 1000 : 0;
+        const honbaBonus = order === 0 ? state.round.honba * 300 : 0;
+
+        deltas[wIdx] += winInfo.points + riichiBonus + honbaBonus;
+        deltas[loserIdx] -= winInfo.points + honbaBonus;
+        winnersDetail.push({ seatIndex: wIdx, name: wp.name, winInfo, winTileId: last.tileId });
+      });
+
+      for (let i = 0; i < n; i++) {
+        state.players[i].points += deltas[i];
+      }
+
+      state.round.riichiSticks = 0;
+      state.status = "round_end";
+      state.lastResult = {
+        type: "ron",
+        winners: winnersDetail,
+        loserIndex: loserIdx,
+        scoreDeltas: deltas
+      };
+      state.version += 1;
+      state.updatedAt = Date.now();
+      return state;
+    }
+
+    // 全員パス → 次の人のツモへ
+    return advanceToNextDraw(state, (loserIdx + 1) % n);
   }
 
   return state;
 }
 
-/**
- * 次の手番プレイヤーのツモ処理（山切れなら流局）
- */
 function advanceToNextDraw(state, nextSeatIndex) {
   if (state.wall.live.length === 0) {
-    // 荒牌流局＆ノーテン罰符精算
     const n = state.players.length;
     const tenpaiSeats = [];
     for (let i = 0; i < n; i++) {
@@ -510,10 +657,9 @@ function advanceToNextDraw(state, nextSeatIndex) {
       }
     }
     const deltas = new Array(n).fill(0);
-    const totalPool = n === 2 ? 1000 : 3000;
     if (tenpaiSeats.length > 0 && tenpaiSeats.length < n) {
-      const gain = Math.floor(totalPool / tenpaiSeats.length);
-      const loss = Math.floor(totalPool / (n - tenpaiSeats.length));
+      const gain = Math.floor(3000 / tenpaiSeats.length);
+      const loss = Math.floor(3000 / (n - tenpaiSeats.length));
       for (let i = 0; i < n; i++) {
         deltas[i] = tenpaiSeats.includes(i) ? gain : -loss;
         state.players[i].points += deltas[i];
@@ -539,6 +685,7 @@ function advanceToNextDraw(state, nextSeatIndex) {
   state.turn.playerIndex = nextSeatIndex;
   state.turn.phase = "discard";
   state.turn.pendingClaims = [];
+  state.turn.claimResponses = {};
   if (nextSeatIndex === state.round.dealerIndex) {
     state.turn.turnCount += 1;
   }
@@ -547,9 +694,6 @@ function advanceToNextDraw(state, nextSeatIndex) {
   return state;
 }
 
-/**
- * APIキー未入力・エラー時の内蔵ルールベースAIフォールバック選択
- */
 export function chooseFallbackAction(state, seatIndex) {
   const legal = getLegalActions(state, seatIndex);
   const tsumo = legal.find((a) => a.action === "tsumo");

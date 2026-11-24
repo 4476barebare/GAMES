@@ -24,7 +24,7 @@ const RESPONSE_SCHEMA = {
     },
     talk: {
       type: "STRING",
-      description: "対戦相手に向けた短い一言セリフ（30文字以内）"
+      description: "卓上に向けた短い一言セリフ（30文字以内）"
     }
   },
   required: ["action", "tile", "thought", "talk"]
@@ -44,7 +44,6 @@ function matchLegalAction(legalActions, rawDecision) {
     );
     if (exact) return exact;
 
-    // 表記ゆれ（"1z" vs "東" 等）を kindId で吸収
     const targetKind = labelToKind(rawDecision.tile);
     if (targetKind !== -1) {
       const kindMatch = legalActions.find(
@@ -86,7 +85,7 @@ async function callGeminiEndpoint({ apiKey, model, systemPrompt, userPrompt }) {
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini API Error (${res.status}): ${errText.slice(0, 160)}`);
+    throw new Error(`Gemini API Error (${res.status}): ${errText.slice(0, 140)}`);
   }
 
   const data = await res.json();
@@ -96,21 +95,24 @@ async function callGeminiEndpoint({ apiKey, model, systemPrompt, userPrompt }) {
   return JSON.parse(text);
 }
 
-/**
- * AIプレイヤーの次の一手を決定（3段階バリデーション＆フォールバック付き）
- */
 export async function decideAiMove({ state, seatIndex, apiKey, baseRulesMd, personaPrompt }) {
   const player = state.players[seatIndex];
   const legalActions = getLegalActions(state, seatIndex);
-  const model = player.aiConfig?.model || "gemini-4-hydrogen";
+  const model = player.aiConfig?.model || "builtin";
 
-  // APIキー未設定または内蔵AI指定時は即座に内蔵エンジンで判断
   if (!apiKey || model === "builtin") {
     const fallback = chooseFallbackAction(state, seatIndex);
+    const talkMap = {
+      riichi: "リーチ！勝負だ。",
+      tsumo: "ツモ！いただきました。",
+      ron: "ロン！そこだ！",
+      pass: "ここは見送ろう。",
+      discard: `よし、${fallback.tile}切りで。`
+    };
     return {
       actionObj: fallback,
       thought: `内蔵エンジン解析により ${fallback.action}${fallback.tile ? " (" + fallback.tile + ")" : ""} を選択。`,
-      talk: fallback.action === "riichi" ? "リーチ！" : fallback.action === "tsumo" ? "ツモ！" : "よし、これだ。"
+      talk: talkMap[fallback.action] || "これで行こう。"
     };
   }
 
@@ -122,7 +124,6 @@ export async function decideAiMove({ state, seatIndex, apiKey, baseRulesMd, pers
   const userPrompt = buildTurnPromptMarkdown(state, seatIndex);
 
   try {
-    // 1回目リクエスト
     const decision1 = await callGeminiEndpoint({
       apiKey,
       model,
@@ -138,7 +139,6 @@ export async function decideAiMove({ state, seatIndex, apiKey, baseRulesMd, pers
       };
     }
 
-    // 2回目自動リトライ（不正手修正）
     const retryPrompt = `${userPrompt}\n\n【エラー修正指示】前回の回答 \`${JSON.stringify(
       decision1
     )}\` は合法アクション一覧に含まれていません。必ずセクション5のリストにある有効な行動と牌を選び直してください。`;

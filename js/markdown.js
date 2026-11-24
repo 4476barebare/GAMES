@@ -1,6 +1,6 @@
 /**
  * markdown.js
- * gameState と自作エンジン解析データから、AI送信用の盤面Markdownを生成する
+ * 4人麻雀（半荘）の局面レポートMarkdown生成
  */
 
 import { tileIdToLabel, indicatorToDoraKind, kindToLabel } from "./tiles.js";
@@ -9,9 +9,6 @@ import { getLegalActions } from "./engine.js";
 
 const WIND_JP = { E: "東", S: "南", W: "西", N: "北" };
 
-/**
- * 指定座席プレイヤー視点の局面レポートMarkdownを生成
- */
 export function buildTurnPromptMarkdown(state, seatIndex) {
   const me = state.players[seatIndex];
   const red = state.config.redDora;
@@ -21,14 +18,21 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
     .map((id) => `\`${kindToLabel(indicatorToDoraKind(id))}\``)
     .join(", ");
 
+  // 暫定順位の算出
+  const ranked = [...state.players].sort((a, b) =>
+    b.points !== a.points ? b.points - a.points : a.seatIndex - b.seatIndex
+  );
+  const myRank = ranked.findIndex((p) => p.seatIndex === seatIndex) + 1;
+  const topDiff = me.points - ranked[0].points;
+
   const lines = [];
   lines.push(
-    `# 局面レポート（${roundStr} / 供託: ${state.round.riichiSticks}本 / 残り山: ${state.wall.remaining}枚 / ${state.turn.turnCount}巡目）`
+    `# 4人半荘 局面レポート（${roundStr} / 供託: ${state.round.riichiSticks}本 / 残り山: ${state.wall.remaining}枚 / ${state.turn.turnCount}巡目）`
   );
   lines.push("");
   lines.push("## 1. 卓の基本情報");
   lines.push(
-    `- **あなた:** ${WIND_JP[me.wind]}家（持ち点: ${me.points.toLocaleString()}点 / 状態: ${
+    `- **あなた:** ${WIND_JP[me.wind]}家（現在${myRank}位 / 持ち点: ${me.points.toLocaleString()}点 / トップ差: ${topDiff >= 0 ? "トップ" : topDiff.toLocaleString()}点 / 状態: ${
       me.isRiichi ? "リーチ中" : "門前"
     }）`
   );
@@ -40,8 +44,8 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
   );
   lines.push("");
 
-  lines.push("## 2. 各プレイヤーの状況（河・持ち点）");
-  lines.push("| 席 | 名前 | 持ち点 | リーチ | 捨て牌（左から古い順 / `*`はツモ切り / `[R]`はリーチ宣言牌） |");
+  lines.push("## 2. 4家の状況（河・持ち点）");
+  lines.push("| 席 | 名前 | 持ち点 | リーチ | 捨て牌（古い順 / `*`ツモ切り / `[R]`リーチ宣言） |");
   lines.push("| :--- | :--- | ---: | :---: | :--- |");
 
   for (const pl of state.players) {
@@ -76,10 +80,10 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
       `- **直前の相手の捨て牌（ロン対象）:** \`${tileIdToLabel(state.turn.lastDiscard.tileId, red)}\``
     );
   }
-  lines.push(`- **フリテン状態:** ${me.isFuriten ? "フリテン中（ロン不可）" : "なし"}`);
+  const furiten = me.isFuriten || me.isTempFuriten || me.isRiichiFuriten;
+  lines.push(`- **フリテン状態:** ${furiten ? "フリテン中（ロン不可）" : "なし"}`);
   lines.push("");
 
-  // 自作エンジン解析カンペ（打牌フェーズ時）
   const legalActions = getLegalActions(state, seatIndex);
   if (state.turn.phase === "discard" && !me.isRiichi) {
     const visible = [];
