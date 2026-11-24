@@ -1,9 +1,10 @@
 /**
  * ui.js
- * 4人麻雀 UI描画（4家すべての河横に副露を整列・ツモ牌/最新相手捨て牌の黄色枠・2段階タップ打牌・手牌黄色枠スルー）
+ * 4人麻雀 SVG牌セット完全対応 UI描画・2タップ選択・黄色ハイライト・自河/他家河横の鳴き牌配置
  */
 
-import { getTileVisual, tileIdToLabel } from "./tiles.js";
+import { tileIdToLabel } from "./tiles.js";
+import { getTileSvg, getTileSvgById } from "./tileSvg.js";
 import { getLegalActions } from "./engine.js";
 import { analyzeDiscardCandidates } from "./shanten.js";
 
@@ -15,32 +16,20 @@ function createTileElement(tileId, options = {}) {
   if (options.variant === "river") div.classList.add("river-tile");
   if (options.variant === "opp") div.classList.add("opp-tile");
   if (options.variant === "meld") div.classList.add("meld-tile");
+  if (options.sideways) div.classList.add("tile-sideways");
   if (options.drawn) div.classList.add("drawn");
   if (options.clickable) div.classList.add("clickable");
   if (options.riichi) div.classList.add("riichi-tile");
   if (options.tsumogiri) div.classList.add("tsumogiri");
-  if (options.calledHighlight) div.classList.add("called-highlight");
-  if (options.highlightYellow) div.classList.add("highlight-yellow");
+  if (options.yellowHighlight) div.classList.add("yellow-highlight");
   if (options.selected) div.classList.add("selected-tile");
 
   if (options.faceDown) {
-    div.classList.add("back");
+    div.innerHTML = getTileSvg("back");
     return div;
   }
 
-  const vis = getTileVisual(tileId, options.redDora !== false);
-  const top = document.createElement("span");
-  top.className = vis.cls;
-  top.textContent = vis.top;
-  div.appendChild(top);
-
-  if (vis.bottom) {
-    const bot = document.createElement("span");
-    bot.className = vis.cls;
-    bot.style.fontSize = options.variant === "self" ? "0.66rem" : "0.5rem";
-    bot.textContent = vis.bottom;
-    div.appendChild(bot);
-  }
+  div.innerHTML = getTileSvgById(tileId, options.redDora !== false);
 
   if (options.onClick) {
     div.addEventListener("click", (e) => {
@@ -52,24 +41,39 @@ function createTileElement(tileId, options = {}) {
   return div;
 }
 
-function renderMelds(containerEl, melds, redDora) {
-  containerEl.innerHTML = "";
-  for (const m of melds) {
+function renderPlayerMelds(seat, player, red) {
+  const container = document.getElementById(`melds-${seat}`);
+  if (!container) return;
+  container.innerHTML = "";
+
+  for (const m of player.melds) {
     const group = document.createElement("div");
     group.className = "meld-group";
-    m.tiles.forEach((tid, idx) => {
-      const faceDown = m.type === "ankan" && (idx === 0 || idx === 3);
-      const calledHighlight = m.calledTile === tid;
-      group.appendChild(
-        createTileElement(tid, {
-          variant: "meld",
-          faceDown,
-          calledHighlight,
-          redDora
-        })
-      );
-    });
-    containerEl.appendChild(group);
+
+    if (m.type === "ankan") {
+      m.tiles.forEach((tid, idx) => {
+        const isBack = idx === 0 || idx === 3;
+        group.appendChild(
+          createTileElement(tid, {
+            variant: "meld",
+            faceDown: isBack,
+            redDora: red
+          })
+        );
+      });
+    } else {
+      m.tiles.forEach((tid) => {
+        const isCalled = m.calledTile !== null && tid === m.calledTile;
+        group.appendChild(
+          createTileElement(tid, {
+            variant: "meld",
+            sideways: isCalled,
+            redDora: red
+          })
+        );
+      });
+    }
+    container.appendChild(group);
   }
 }
 
@@ -78,7 +82,6 @@ export function renderGame(state, uiOptions, handlers) {
   const showAllHands =
     uiOptions.openHand || state.status === "round_end" || state.status === "match_end";
 
-  // 中央HUD
   document.getElementById("round-label").textContent = `${WIND_JP[state.round.wind]}${
     state.round.number
   }局 ${state.round.honba}本場`;
@@ -98,17 +101,27 @@ export function renderGame(state, uiOptions, handlers) {
   } else if (state.status === "round_end") {
     banner.textContent = "終局";
   } else if (state.turn.phase === "claim_check") {
-    banner.textContent = "鳴き/ロン判定";
+    banner.textContent = "鳴き・ロン判定";
   } else {
-    banner.textContent = `${WIND_JP[activePlayer.wind]}:${activePlayer.name}`;
+    banner.textContent = `${WIND_JP[activePlayer.wind]}家 (${activePlayer.name})`;
   }
 
-  // 直前の相手（Seat 1, 2, 3）の最新捨て牌IDを特定
-  const lastDiscard = state.turn.lastDiscard;
-  const latestOppDiscardTileId =
-    lastDiscard && lastDiscard.playerIndex !== 0 ? lastDiscard.tileId : null;
+  const self = state.players[0];
+  const legalSelf =
+    state.status === "playing" && self.control === "human" ? getLegalActions(state, 0) : [];
+  const isHumanClaimCheck =
+    state.status === "playing" &&
+    self.control === "human" &&
+    state.turn.phase === "claim_check" &&
+    state.turn.pendingClaims.includes(0) &&
+    legalSelf.length > 0;
 
-  // 全4席の情報・河・副露・手牌を描画
+  const isHumanDiscardTurn =
+    state.status === "playing" &&
+    self.control === "human" &&
+    state.turn.phase === "discard" &&
+    state.turn.playerIndex === 0;
+
   for (let seat = 0; seat < 4; seat++) {
     const p = state.players[seat];
     document.getElementById(`wind-${seat}`).textContent = WIND_JP[p.wind];
@@ -125,194 +138,199 @@ export function renderGame(state, uiOptions, handlers) {
       thinkEl.classList.toggle("hidden", uiOptions.thinkingSeat !== seat);
     }
 
-    // 河
+    // 河描画（最新打牌に黄色い枠・リーチ宣言牌は横倒し）
     const riverEl = document.getElementById(`river-${seat}`);
     riverEl.innerHTML = "";
-    const visibleDiscards = p.discards.filter((d) => d.calledBy === null);
-    visibleDiscards.forEach((d, idx) => {
-      const isLatestOpp =
-        seat !== 0 &&
-        idx === visibleDiscards.length - 1 &&
-        latestOppDiscardTileId !== null &&
-        d.tileId === latestOppDiscardTileId;
+    const lastDiscard = state.turn.lastDiscard;
+    p.discards.forEach((d, idx) => {
+      const isLatestDiscard =
+        state.status === "playing" &&
+        lastDiscard &&
+        lastDiscard.playerIndex === seat &&
+        idx === p.discards.length - 1 &&
+        d.calledBy === null;
 
       riverEl.appendChild(
         createTileElement(d.tileId, {
           variant: "river",
           riichi: d.isRiichi,
+          sideways: d.isRiichi,
           tsumogiri: d.isTsumogiri,
-          highlightYellow: isLatestOpp,
+          yellowHighlight: isLatestDiscard,
           redDora: red
         })
       );
     });
 
-    // 4家それぞれの河の横に配置された副露（鳴き牌）コンテナを描画
-    const meldsEl = document.getElementById(`melds-${seat}`);
-    if (meldsEl) {
-      renderMelds(meldsEl, p.melds, red);
-    }
+    // 鳴き牌描画（自河・他家河の横に配置）
+    renderPlayerMelds(seat, p, red);
 
-    // 手牌（Seat 0＝自分、Seat 2＝対面）
+    // 手牌描画
     const handEl = document.getElementById(`hand-${seat}`);
-    if (!handEl) continue;
     handEl.innerHTML = "";
 
     if (seat === 0) {
-      const isHumanDiscardTurn =
-        state.status === "playing" &&
-        p.control === "human" &&
-        state.turn.phase === "discard" &&
-        state.turn.playerIndex === 0;
+      // 鳴き/ロン選択待機中は自分の手牌すべてを黄色枠で囲み、タップでスルー
+      if (isHumanClaimCheck) {
+        const passAct = legalSelf.find((a) => a.action === "pass");
+        for (const tid of p.hand) {
+          handEl.appendChild(
+            createTileElement(tid, {
+              variant: "self",
+              clickable: true,
+              yellowHighlight: true,
+              redDora: red,
+              onClick: passAct ? () => handlers.onHumanAction(passAct) : null
+            })
+          );
+        }
+      } else {
+        const defaultHighlightId =
+          isHumanDiscardTurn && uiOptions.selectedTileId === null ? p.drawnTile : uiOptions.selectedTileId;
 
-      const isHumanClaimTurn =
-        state.status === "playing" &&
-        p.control === "human" &&
-        state.turn.phase === "claim_check" &&
-        state.turn.pendingClaims.includes(0);
-
-      const scrollWrap = document.getElementById("hand-scroll-wrap");
-      scrollWrap.classList.toggle("through-target", isHumanClaimTurn);
-      scrollWrap.onclick = isHumanClaimTurn ? () => handlers.onHumanPass() : null;
-
-      for (const tid of p.hand) {
-        const clickable = (isHumanDiscardTurn && !p.isRiichi) || isHumanClaimTurn;
-        const isSelected = isHumanDiscardTurn && uiOptions.selectedTileId === tid;
-        handEl.appendChild(
-          createTileElement(tid, {
-            variant: "self",
-            clickable,
-            selected: isSelected,
-            redDora: red,
-            onClick: isHumanClaimTurn
-              ? () => handlers.onHumanPass()
-              : clickable
-              ? (id) => handlers.onHumanTileTap(id)
-              : null
-          })
-        );
+        for (const tid of p.hand) {
+          const clickable = isHumanDiscardTurn && !p.isRiichi;
+          const isSelected = isHumanDiscardTurn && defaultHighlightId === tid;
+          handEl.appendChild(
+            createTileElement(tid, {
+              variant: "self",
+              clickable,
+              yellowHighlight: isSelected,
+              selected: isHumanDiscardTurn && uiOptions.selectedTileId === tid,
+              redDora: red,
+              onClick: clickable ? (id) => handlers.onHumanTileTap(id) : null
+            })
+          );
+        }
+        if (p.drawnTile !== null) {
+          const isSelected = isHumanDiscardTurn && defaultHighlightId === p.drawnTile;
+          handEl.appendChild(
+            createTileElement(p.drawnTile, {
+              variant: "self",
+              drawn: true,
+              clickable: isHumanDiscardTurn,
+              yellowHighlight: isSelected,
+              selected: isHumanDiscardTurn && uiOptions.selectedTileId === p.drawnTile,
+              redDora: red,
+              onClick: isHumanDiscardTurn ? (id) => handlers.onHumanTileTap(id) : null
+            })
+          );
+        }
       }
-
-      if (p.drawnTile !== null) {
-        const isSelected = isHumanDiscardTurn && uiOptions.selectedTileId === p.drawnTile;
-        handEl.appendChild(
-          createTileElement(p.drawnTile, {
-            variant: "self",
-            drawn: true,
-            clickable: isHumanDiscardTurn || isHumanClaimTurn,
-            highlightYellow: true,
-            selected: isSelected,
-            redDora: red,
-            onClick: isHumanClaimTurn
-              ? () => handlers.onHumanPass()
-              : isHumanDiscardTurn
-              ? (id) => handlers.onHumanTileTap(id)
-              : null
-          })
-        );
-      }
-    } else if (seat === 2) {
-      for (const tid of p.hand) {
-        handEl.appendChild(
-          createTileElement(tid, {
-            variant: "opp",
-            faceDown: !showAllHands,
-            redDora: red
-          })
-        );
-      }
-      if (p.drawnTile !== null) {
-        handEl.appendChild(
-          createTileElement(p.drawnTile, {
-            variant: "opp",
-            drawn: true,
-            faceDown: !showAllHands,
-            redDora: red
-          })
-        );
-      }
-    }
-  }
-
-  // 自分（Seat 0）のアクションバー＆全選択肢表示
-  const self = state.players[0];
-  const isHumanClaimTurn =
-    state.status === "playing" &&
-    self.control === "human" &&
-    state.turn.phase === "claim_check" &&
-    state.turn.pendingClaims.includes(0);
-
-  const actionBarEl = document.getElementById("action-bar");
-  const selfHeaderEl = document.getElementById("seat-header-0");
-  const shantenEl = document.getElementById("shanten-info");
-  const btnBox = document.getElementById("action-buttons");
-
-  actionBarEl.classList.toggle("claim-mode", isHumanClaimTurn);
-  selfHeaderEl.classList.toggle("hidden", isHumanClaimTurn);
-  shantenEl.classList.toggle("hidden", isHumanClaimTurn);
-
-  if (!isHumanClaimTurn) {
-    const visible = [];
-    state.players.forEach((pl) => {
-      pl.discards.forEach((d) => visible.push(d.tileId));
-      pl.melds.forEach((m) => m.tiles.forEach((t) => visible.push(t)));
-    });
-    state.wall.doraIndicators.forEach((d) => visible.push(d));
-
-    const cands = analyzeDiscardCandidates(
-      self.hand,
-      self.drawnTile,
-      visible,
-      red,
-      self.melds.length
-    );
-    const bestS = cands.length > 0 ? cands[0].shantenAfter : "-";
-    if (bestS === 0) {
-      shantenEl.textContent = `聴牌 待:${cands[0].waits.map((w) => w.label).join(",")}`;
     } else {
-      shantenEl.textContent = `${bestS}向聴`;
+      for (const tid of p.hand) {
+        handEl.appendChild(
+          createTileElement(tid, {
+            variant: "opp",
+            faceDown: !showAllHands,
+            redDora: red
+          })
+        );
+      }
+      if (p.drawnTile !== null) {
+        handEl.appendChild(
+          createTileElement(p.drawnTile, {
+            variant: "opp",
+            drawn: seat === 2,
+            faceDown: !showAllHands,
+            redDora: red
+          })
+        );
+      }
     }
   }
 
+  // シャンテン表示
+  const visible = [];
+  state.players.forEach((pl) => {
+    pl.discards.forEach((d) => visible.push(d.tileId));
+    pl.melds.forEach((m) => m.tiles.forEach((t) => visible.push(t)));
+  });
+  state.wall.doraIndicators.forEach((d) => visible.push(d));
+  const cands = analyzeDiscardCandidates(self.hand, self.drawnTile, visible, red, self.melds.length);
+  const bestS = cands.length > 0 ? cands[0].shantenAfter : "-";
+  const shantenEl = document.getElementById("shanten-info");
+  if (isHumanClaimCheck) {
+    shantenEl.textContent = "鳴き・ロン選択中（手牌タップでスルー）";
+  } else if (bestS === 0) {
+    shantenEl.textContent = `テンパイ！待:${cands[0].waits.map((w) => w.label).join(",")}`;
+  } else {
+    shantenEl.textContent = `${bestS}シャンテン`;
+  }
+
+  // アクションボタン描画（スルーボタンは出さず、全選択肢を表示）
+  const btnBox = document.getElementById("action-buttons");
   btnBox.innerHTML = "";
   if (state.status === "playing" && self.control === "human") {
-    const legal = getLegalActions(state, 0);
-
-    // 1. ツモ・ロン
-    for (const act of legal.filter((a) => a.action === "tsumo" || a.action === "ron")) {
+    const tsumoAct = legalSelf.find((a) => a.action === "tsumo");
+    if (tsumoAct) {
       const b = document.createElement("button");
       b.className = "btn btn-danger";
-      b.textContent = `${act.action === "tsumo" ? "ツモ" : "ロン"}(${act.winInfo.points})`;
-      b.onclick = () => handlers.onHumanAction(act);
+      b.textContent = `ツモ (${tsumoAct.winInfo.points}点)`;
+      b.onclick = () => handlers.onHumanAction(tsumoAct);
       btnBox.appendChild(b);
     }
 
-    // 2. リーチ
-    const riichiActs = legal.filter((a) => a.action === "riichi");
-    for (const rAct of riichiActs) {
+    const ronAct = legalSelf.find((a) => a.action === "ron");
+    if (ronAct) {
       const b = document.createElement("button");
-      b.className = "btn btn-warn";
-      b.textContent = `立直(${rAct.tile})`;
-      b.onclick = () => handlers.onHumanAction(rAct);
+      b.className = "btn btn-danger";
+      b.textContent = `ロン (${ronAct.winInfo.points}点)`;
+      b.onclick = () => handlers.onHumanAction(ronAct);
       btnBox.appendChild(b);
     }
 
-    // 3. ポン・大明槓・暗槓・加槓
-    for (const cAct of legal.filter((a) => ["pon", "daiminkan", "ankan", "kakan"].includes(a.action))) {
-      const labelMap = { pon: "ポン", daiminkan: "カン", ankan: "暗槓", kakan: "加槓" };
+    const ponAct = legalSelf.find((a) => a.action === "pon");
+    if (ponAct) {
       const b = document.createElement("button");
       b.className = "btn btn-call";
-      b.textContent = `${labelMap[cAct.action]}(${cAct.tile})`;
+      b.textContent = `ポン (${ponAct.tile})`;
+      b.onclick = () => handlers.onHumanAction(ponAct);
+      btnBox.appendChild(b);
+    }
+
+    const minkanAct = legalSelf.find((a) => a.action === "minkan");
+    if (minkanAct) {
+      const b = document.createElement("button");
+      b.className = "btn btn-call";
+      b.textContent = `カン (${minkanAct.tile})`;
+      b.onclick = () => handlers.onHumanAction(minkanAct);
+      btnBox.appendChild(b);
+    }
+
+    const chiActs = legalSelf.filter((a) => a.action === "chi");
+    for (const cAct of chiActs) {
+      const b = document.createElement("button");
+      b.className = "btn btn-call";
+      b.textContent = `チー (${cAct.chiLabel})`;
       b.onclick = () => handlers.onHumanAction(cAct);
       btnBox.appendChild(b);
     }
 
-    // 4. チー
-    for (const chiAct of legal.filter((a) => a.action === "chi")) {
+    const ankanActs = legalSelf.filter((a) => a.action === "ankan");
+    for (const aAct of ankanActs) {
       const b = document.createElement("button");
       b.className = "btn btn-call";
-      b.textContent = `チー[${chiAct.consume.join("")}]`;
-      b.onclick = () => handlers.onHumanAction(chiAct);
+      b.textContent = `暗槓 (${aAct.tile})`;
+      b.onclick = () => handlers.onHumanAction(aAct);
+      btnBox.appendChild(b);
+    }
+
+    const kakanActs = legalSelf.filter((a) => a.action === "kakan");
+    for (const kAct of kakanActs) {
+      const b = document.createElement("button");
+      b.className = "btn btn-call";
+      b.textContent = `加槓 (${kAct.tile})`;
+      b.onclick = () => handlers.onHumanAction(kAct);
+      btnBox.appendChild(b);
+    }
+
+    const riichiActs = legalSelf.filter((a) => a.action === "riichi");
+    for (const rAct of riichiActs) {
+      const b = document.createElement("button");
+      b.className = "btn btn-warn";
+      b.textContent = `リーチ(${rAct.tile})`;
+      b.onclick = () => handlers.onHumanAction(rAct);
       btnBox.appendChild(b);
     }
   }
@@ -337,6 +355,11 @@ function renderThoughtCards(state) {
     `;
     container.appendChild(card);
   }
+}
+
+export function updateTicker(speaker, text) {
+  document.getElementById("ticker-speaker").textContent = speaker;
+  document.getElementById("ticker-text").textContent = text;
 }
 
 export function renderLogs(logs) {
@@ -370,7 +393,10 @@ export function showRoundResultModal(state) {
         const payDetail = w.winInfo.tsumoPay ? ` (${w.winInfo.tsumoPay.text})` : "";
         return `
           <div style="margin-bottom:8px;">
-            <p style="margin:2px 0;"><strong>和了者:</strong> ${escapeHtml(w.name)} / アガリ牌: <strong>${tileIdToLabel(w.winTileId, red)}</strong></p>
+            <p style="margin:2px 0;"><strong>和了者:</strong> ${escapeHtml(w.name)} / アガリ牌: <strong>${tileIdToLabel(
+          w.winTileId,
+          red
+        )}</strong></p>
             <p style="margin:2px 0;"><strong>役:</strong> ${escapeHtml(yakuStr)}</p>
             <p style="margin:2px 0;"><strong>得点:</strong> ${w.winInfo.label} <strong>${w.winInfo.points.toLocaleString()}点</strong>${payDetail}</p>
           </div>

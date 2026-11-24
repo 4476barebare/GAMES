@@ -1,6 +1,6 @@
 /**
  * llm.js
- * Gemini API 通信・Structured Outputs（チー/ポン/カン対応）・座席別APIキー対応
+ * Gemini API 通信・座席別APIキー＆モデル対応・合法手バリデーション
  */
 
 import { labelToKind } from "./tiles.js";
@@ -12,16 +12,15 @@ const RESPONSE_SCHEMA = {
   properties: {
     action: {
       type: "STRING",
-      enum: ["discard", "riichi", "tsumo", "ron", "pon", "chi", "daiminkan", "ankan", "kakan", "pass"]
+      enum: ["discard", "riichi", "tsumo", "ron", "pon", "chi", "minkan", "ankan", "kakan", "pass"]
     },
     tile: {
       type: "STRING",
       description: "対象となる牌表記（例: 東, 9s, 0m）。pass時は空文字。"
     },
-    consume: {
-      type: "ARRAY",
-      items: { type: "STRING" },
-      description: "actionがchiの場合のみ、手牌から出す2枚の牌表記（例: ['2m', '3m']）。それ以外は空配列。"
+    chiLabel: {
+      type: "STRING",
+      description: "chiの場合の面子表記（例: 3s4s5s）。それ以外は空文字。"
     },
     thought: {
       type: "STRING",
@@ -32,33 +31,28 @@ const RESPONSE_SCHEMA = {
       description: "卓上に向けた短い一言セリフ（30文字以内）"
     }
   },
-  required: ["action", "tile", "consume", "thought", "talk"]
+  required: ["action", "tile", "thought", "talk"]
 };
 
 function matchLegalAction(legalActions, rawDecision) {
   if (!rawDecision || !rawDecision.action) return null;
   const actType = rawDecision.action;
 
-  if (["tsumo", "ron", "pass", "pon", "daiminkan"].includes(actType)) {
+  if (actType === "tsumo" || actType === "ron" || actType === "pass") {
     return legalActions.find((a) => a.action === actType) || null;
   }
 
   if (actType === "chi") {
-    const chiOptions = legalActions.filter((a) => a.action === "chi");
-    if (chiOptions.length === 0) return null;
-    if (chiOptions.length === 1) return chiOptions[0];
-
-    const reqKinds = Array.isArray(rawDecision.consume)
-      ? rawDecision.consume.map(labelToKind).sort((a, b) => a - b)
-      : [];
-    const matched = chiOptions.find((opt) => {
-      const optKinds = opt.consume.map(labelToKind).sort((a, b) => a - b);
-      return optKinds.length === reqKinds.length && optKinds.every((v, i) => v === reqKinds[i]);
-    });
-    return matched || chiOptions[0];
+    const chiOpts = legalActions.filter((a) => a.action === "chi");
+    if (chiOpts.length === 0) return null;
+    if (rawDecision.chiLabel) {
+      const exactChi = chiOpts.find((a) => a.chiLabel === String(rawDecision.chiLabel).trim());
+      if (exactChi) return exactChi;
+    }
+    return chiOpts[0];
   }
 
-  if (["discard", "riichi", "ankan", "kakan"].includes(actType)) {
+  if (["discard", "riichi", "pon", "minkan", "ankan", "kakan"].includes(actType)) {
     const exact = legalActions.find(
       (a) => a.action === actType && a.tile === String(rawDecision.tile).trim()
     );
@@ -115,13 +109,13 @@ async function callGeminiEndpoint({ apiKey, model, systemPrompt, userPrompt }) {
   return JSON.parse(text);
 }
 
-export async function decideAiMove({ state, seatIndex, fallbackApiKey, baseRulesMd, personaPrompt }) {
+export async function decideAiMove({ state, seatIndex, commonApiKey, baseRulesMd, personaPrompt }) {
   const player = state.players[seatIndex];
   const legalActions = getLegalActions(state, seatIndex);
   const model = player.aiConfig?.model || "builtin";
-  const effectiveApiKey = (player.aiConfig?.apiKey || "").trim() || (fallbackApiKey || "").trim();
+  const effectiveKey = (player.aiConfig?.apiKey || "").trim() || (commonApiKey || "").trim();
 
-  if (!effectiveApiKey || model === "builtin") {
+  if (!effectiveKey || model === "builtin") {
     const fallback = chooseFallbackAction(state, seatIndex);
     const talkMap = {
       riichi: "リーチ！勝負だ。",
@@ -129,17 +123,15 @@ export async function decideAiMove({ state, seatIndex, fallbackApiKey, baseRules
       ron: "ロン！そこだ！",
       pon: "ポン！",
       chi: "チー！",
-      daiminkan: "カン！",
+      minkan: "カン！",
       ankan: "暗槓！",
       kakan: "加槓！",
-      pass: "ここはスルー。",
-      discard: `よし、${fallback.tile}切り。`
+      pass: "ここはスルーで。",
+      discard: `よし、${fallback.tile}切りで。`
     };
     return {
       actionObj: fallback,
-      thought: `[内蔵:${player.aiConfig?.personaId || "standard"}] ${fallback.action}${
-        fallback.tile ? " (" + fallback.tile + ")" : ""
-      } を選択。`,
+      thought: `内蔵エンジン解析により ${fallback.action}${fallback.tile ? " (" + fallback.tile + ")" : ""} を選択。`,
       talk: talkMap[fallback.action] || "これで行こう。"
     };
   }
@@ -153,7 +145,7 @@ export async function decideAiMove({ state, seatIndex, fallbackApiKey, baseRules
 
   try {
     const decision1 = await callGeminiEndpoint({
-      apiKey: effectiveApiKey,
+      apiKey: effectiveKey,
       model,
       systemPrompt,
       userPrompt
@@ -169,10 +161,10 @@ export async function decideAiMove({ state, seatIndex, fallbackApiKey, baseRules
 
     const retryPrompt = `${userPrompt}\n\n【エラー修正指示】前回の回答 \`${JSON.stringify(
       decision1
-    )}\` は合法アクション一覧に含まれていません。必ずセクション5のリストにある有効な行動を選び直してください。`;
+    )}\` は合法アクション一覧に含まれていません。必ずセクション5のリストにある有効な行動と牌を選び直してください。`;
 
     const decision2 = await callGeminiEndpoint({
-      apiKey: effectiveApiKey,
+      apiKey: effectiveKey,
       model,
       systemPrompt,
       userPrompt: retryPrompt
@@ -192,7 +184,7 @@ export async function decideAiMove({ state, seatIndex, fallbackApiKey, baseRules
     const fallback = chooseFallbackAction(state, seatIndex);
     return {
       actionObj: fallback,
-      thought: `[自動補正: ${err.message}] 内蔵AI推奨手を実行しました。`,
+      thought: `[自動補正: ${err.message}] エンジン推奨手を実行しました。`,
       talk: "おっと、手元が狂ったな…"
     };
   }

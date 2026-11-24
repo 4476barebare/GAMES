@@ -1,17 +1,15 @@
 /**
  * engine.js
- * 4人麻雀（半荘戦）鳴き完全対応エンジン（チー・ポン・大明槓・暗槓・加槓・優先順位判定・性格別内蔵AI）
+ * 4人麻雀（半荘戦・チー/ポン/大明槓/暗槓/加槓/嶺上開花/カンドラ完全対応）ゲームエンジン
  */
 
 import {
   tileIdToKind,
   tileIdToLabel,
   kindToLabel,
-  indicatorToDoraKind,
   sortTileIds,
   toCounts34,
-  findTileIdByLabel,
-  findMultipleTileIdsByLabels
+  findTileIdByLabel
 } from "./tiles.js";
 import { calcShanten, analyzeDiscardCandidates } from "./shanten.js";
 import { evaluateWin, checkFuriten } from "./score.js";
@@ -38,9 +36,9 @@ function buildWall() {
   return {
     live: shuffled,
     dead,
+    rinshanIndex: 0,
     doraIndicators: [dead[4]],
     uraDoraIndicators: [dead[5]],
-    kanCount: 0,
     remaining: shuffled.length
   };
 }
@@ -50,21 +48,21 @@ export function createMatchState(options = {}) {
     { id: "p0", name: "あなた", control: "human", aiConfig: null },
     {
       id: "p1",
-      name: "下家(デジタル)",
+      name: "下家AI",
       control: "ai",
-      aiConfig: { provider: "gemini", model: "builtin", apiKey: "", personaId: "digital_balanced", customPrompt: "" }
+      aiConfig: { provider: "gemini", model: "builtin", personaId: "digital_balanced", customPrompt: "", apiKey: "" }
     },
     {
       id: "p2",
-      name: "対面(超攻撃)",
+      name: "対面AI",
       control: "ai",
-      aiConfig: { provider: "gemini", model: "builtin", apiKey: "", personaId: "aggressive_riichi", customPrompt: "" }
+      aiConfig: { provider: "gemini", model: "builtin", personaId: "aggressive_riichi", customPrompt: "", apiKey: "" }
     },
     {
       id: "p3",
-      name: "上家(鉄壁守備)",
+      name: "上家AI",
       control: "ai",
-      aiConfig: { provider: "gemini", model: "builtin", apiKey: "", personaId: "iron_defense", customPrompt: "" }
+      aiConfig: { provider: "gemini", model: "builtin", personaId: "iron_defense", customPrompt: "", apiKey: "" }
     }
   ];
 
@@ -124,10 +122,10 @@ export function createMatchState(options = {}) {
       playerIndex: 0,
       phase: "discard",
       turnCount: 1,
-      isRinshanTurn: false,
       lastDiscard: null,
       pendingClaims: [],
-      claimResponses: {}
+      claimResponses: {},
+      afterKan: false
     },
     wall: null,
     players,
@@ -174,10 +172,10 @@ function dealRound(prevState) {
     playerIndex: dealerIndex,
     phase: "discard",
     turnCount: 1,
-    isRinshanTurn: false,
     lastDiscard: null,
     pendingClaims: [],
-    claimResponses: {}
+    claimResponses: {},
+    afterKan: false
   };
   state.version += 1;
   state.updatedAt = Date.now();
@@ -300,30 +298,29 @@ function finalizeHanchan(state, reason) {
   return state;
 }
 
-function getChiOptions(handTileIds, discardedTileId, redDora) {
-  const dk = tileIdToKind(discardedTileId);
-  if (dk >= 27) return [];
-  const num = dk % 9;
-  const counts = toCounts34(handTileIds);
+function getChiOptions(handTileIds, calledTileId, red) {
+  const k = tileIdToKind(calledTileId);
+  if (k >= 27) return [];
+  const n = k % 9;
+  const patterns = [];
+  if (n >= 2) patterns.push([k - 2, k - 1]);
+  if (n >= 1 && n <= 7) patterns.push([k - 1, k + 1]);
+  if (n <= 6) patterns.push([k + 1, k + 2]);
+
   const options = [];
-
-  if (num >= 2 && counts[dk - 2] > 0 && counts[dk - 1] > 0) {
-    options.push(pickBestChiPair(handTileIds, dk - 2, dk - 1, redDora));
+  for (const [k1, k2] of patterns) {
+    const t1 = handTileIds.find((id) => tileIdToKind(id) === k1);
+    const t2 = handTileIds.find((id) => tileIdToKind(id) === k2 && id !== t1);
+    if (t1 !== undefined && t2 !== undefined) {
+      const sorted = sortTileIds([t1, t2, calledTileId]);
+      options.push({
+        consumeTileIds: [t1, t2],
+        meldTileIds: sorted,
+        label: sorted.map((id) => tileIdToLabel(id, red)).join("")
+      });
+    }
   }
-  if (num >= 1 && num <= 7 && counts[dk - 1] > 0 && counts[dk + 1] > 0) {
-    options.push(pickBestChiPair(handTileIds, dk - 1, dk + 1, redDora));
-  }
-  if (num <= 6 && counts[dk + 1] > 0 && counts[dk + 2] > 0) {
-    options.push(pickBestChiPair(handTileIds, dk + 1, dk + 2, redDora));
-  }
-
   return options;
-}
-
-function pickBestChiPair(handTileIds, kindA, kindB, redDora) {
-  const idA = handTileIds.find((id) => tileIdToKind(id) === kindA);
-  const idB = handTileIds.find((id) => tileIdToKind(id) === kindB);
-  return [tileIdToLabel(idA, redDora), tileIdToLabel(idB, redDora)];
 }
 
 export function getLegalActions(state, seatIndex) {
@@ -332,18 +329,21 @@ export function getLegalActions(state, seatIndex) {
 
   const p = state.players[seatIndex];
   const red = state.config.redDora;
-  const isMenzen = p.melds.every((m) => m.type === "ankan");
+  const totalKans = state.players.reduce(
+    (sum, pl) => sum + pl.melds.filter((m) => m.type.includes("kan")).length,
+    0
+  );
 
+  // 1. 自摸後の打牌・ツモ和了・暗槓・加槓フェーズ
   if (state.turn.phase === "discard" && state.turn.playerIndex === seatIndex) {
     if (p.drawnTile !== null) {
       const winCheck = evaluateWin({
         handTileIds: p.hand,
-        melds: p.melds,
         winTileId: p.drawnTile,
+        melds: p.melds,
         isTsumo: true,
         isRiichi: p.isRiichi,
         isIppatsu: p.isIppatsu,
-        isRinshan: state.turn.isRinshanTurn,
         isDealer: seatIndex === state.round.dealerIndex,
         seatWind: p.wind,
         roundWind: state.round.wind,
@@ -352,25 +352,41 @@ export function getLegalActions(state, seatIndex) {
         redDoraEnabled: red
       });
       if (winCheck) {
+        if (state.turn.afterKan) {
+          winCheck.yakus.push({ name: "嶺上開花", han: 1 });
+        }
         actions.push({ action: "tsumo", tile: tileIdToLabel(p.drawnTile, red), winInfo: winCheck });
       }
     }
 
-    const allHand = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
-    const counts = toCounts34(allHand);
+    const allClosed = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
 
-    if (p.drawnTile !== null && state.wall.remaining > 1 && state.wall.kanCount < 4) {
+    // 暗槓・加槓判定
+    if (state.config.allowCalls && totalKans < 4 && state.wall.remaining >= 2 && p.drawnTile !== null) {
+      const counts = toCounts34(allClosed);
       for (let k = 0; k < 34; k++) {
-        if (counts[k] === 4 && !p.isRiichi) {
-          actions.push({ action: "ankan", tile: kindToLabel(k), kindId: k });
+        if (counts[k] === 4) {
+          if (!p.isRiichi || tileIdToKind(p.drawnTile) === k) {
+            const kanTiles = allClosed.filter((id) => tileIdToKind(id) === k);
+            actions.push({
+              action: "ankan",
+              tile: kindToLabel(k),
+              consumeTileIds: kanTiles
+            });
+          }
         }
       }
       if (!p.isRiichi) {
         for (const m of p.melds) {
           if (m.type === "pon") {
-            const pk = tileIdToKind(m.tiles[0]);
-            if (counts[pk] >= 1) {
-              actions.push({ action: "kakan", tile: kindToLabel(pk), kindId: pk });
+            const ponKind = tileIdToKind(m.tiles[0]);
+            const addTile = allClosed.find((id) => tileIdToKind(id) === ponKind);
+            if (addTile !== undefined) {
+              actions.push({
+                action: "kakan",
+                tile: tileIdToLabel(addTile, red),
+                consumeTileIds: [addTile]
+              });
             }
           }
         }
@@ -389,17 +405,23 @@ export function getLegalActions(state, seatIndex) {
     }
 
     const seenLabels = new Set();
-    for (const tid of allHand) {
+    const isMenzen = p.melds.every((m) => m.type === "ankan");
+
+    for (const tid of allClosed) {
       const label = tileIdToLabel(tid, red);
       if (seenLabels.has(label)) continue;
       seenLabels.add(label);
 
       actions.push({ action: "discard", tile: label, tileId: tid });
 
-      if (isMenzen && p.points >= 1000 && state.wall.remaining >= 4) {
+      if (
+        isMenzen &&
+        p.points >= 1000 &&
+        state.wall.remaining >= 4
+      ) {
         const remain = [];
         let removed = false;
-        for (const x of allHand) {
+        for (const x of allClosed) {
           if (!removed && x === tid) {
             removed = true;
             continue;
@@ -414,19 +436,20 @@ export function getLegalActions(state, seatIndex) {
     return actions;
   }
 
+  // 2. 他家打牌に対するロン・ポン・大明槓・チー判定フェーズ
   if (state.turn.phase === "claim_check" && state.turn.pendingClaims.includes(seatIndex)) {
     const last = state.turn.lastDiscard;
     if (!last) return actions;
 
-    const dLabel = tileIdToLabel(last.tileId, red);
-    const dk = tileIdToKind(last.tileId);
+    const calledLabel = tileIdToLabel(last.tileId, red);
+    const calledKind = tileIdToKind(last.tileId);
     const isAnyFuriten = p.isFuriten || p.isTempFuriten || p.isRiichiFuriten;
 
     if (!isAnyFuriten) {
       const ronCheck = evaluateWin({
         handTileIds: p.hand,
-        melds: p.melds,
         winTileId: last.tileId,
+        melds: p.melds,
         isTsumo: false,
         isRiichi: p.isRiichi,
         isIppatsu: p.isIppatsu,
@@ -438,26 +461,36 @@ export function getLegalActions(state, seatIndex) {
         redDoraEnabled: red
       });
       if (ronCheck) {
-        actions.push({ action: "ron", tile: dLabel, winInfo: ronCheck });
+        actions.push({ action: "ron", tile: calledLabel, winInfo: ronCheck });
       }
     }
 
-    if (state.config.allowCalls && !p.isRiichi && state.wall.remaining > 1) {
-      const counts = toCounts34(p.hand);
-
-      if (counts[dk] >= 2) {
-        actions.push({ action: "pon", tile: dLabel });
+    if (state.config.allowCalls && !p.isRiichi && state.wall.remaining >= 2) {
+      const sameTiles = p.hand.filter((id) => tileIdToKind(id) === calledKind);
+      if (sameTiles.length >= 2) {
+        actions.push({
+          action: "pon",
+          tile: calledLabel,
+          consumeTileIds: sameTiles.slice(0, 2)
+        });
       }
-
-      if (counts[dk] === 3 && state.wall.kanCount < 4) {
-        actions.push({ action: "daiminkan", tile: dLabel });
+      if (sameTiles.length >= 3 && totalKans < 4) {
+        actions.push({
+          action: "minkan",
+          tile: calledLabel,
+          consumeTileIds: sameTiles.slice(0, 3)
+        });
       }
-
-      const isShimocha = seatIndex === (last.playerIndex + 1) % 4;
+      const isShimocha = (last.playerIndex + 1) % 4 === seatIndex;
       if (isShimocha) {
-        const chiPairs = getChiOptions(p.hand, last.tileId, red);
-        for (const pair of chiPairs) {
-          actions.push({ action: "chi", tile: dLabel, consume: pair });
+        const chiOpts = getChiOptions(p.hand, last.tileId, red);
+        for (const opt of chiOpts) {
+          actions.push({
+            action: "chi",
+            tile: calledLabel,
+            chiLabel: opt.label,
+            consumeTileIds: opt.consumeTileIds
+          });
         }
       }
     }
@@ -478,16 +511,16 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
   if (meta.thought !== undefined) p.lastThought = meta.thought;
   if (meta.talk !== undefined) p.lastTalk = meta.talk;
 
+  // A. ツモ和了
   if (actionObj.action === "tsumo") {
     const isDealer = seatIndex === state.round.dealerIndex;
     const winInfo = evaluateWin({
       handTileIds: p.hand,
-      melds: p.melds,
       winTileId: p.drawnTile,
+      melds: p.melds,
       isTsumo: true,
       isRiichi: p.isRiichi,
       isIppatsu: p.isIppatsu,
-      isRinshan: state.turn.isRinshanTurn,
       isDealer,
       seatWind: p.wind,
       roundWind: state.round.wind,
@@ -527,42 +560,47 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     return state;
   }
 
+  // A-2. 暗槓・加槓
   if (actionObj.action === "ankan" || actionObj.action === "kakan") {
-    const targetKind =
-      actionObj.kindId !== undefined
-        ? actionObj.kindId
-        : findTileIdByLabel([...p.hand, p.drawnTile], actionObj.tile, red) >> 2;
-    const allHand = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
+    const allClosed = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
+    const consumeSet = new Set(actionObj.consumeTileIds);
+    p.hand = sortTileIds(allClosed.filter((id) => !consumeSet.has(id)));
+    p.drawnTile = null;
 
     if (actionObj.action === "ankan") {
-      const kanTiles = allHand.filter((id) => tileIdToKind(id) === targetKind).slice(0, 4);
-      const remain = allHand.filter((id) => !kanTiles.includes(id));
-      p.hand = sortTileIds(remain);
-      p.drawnTile = null;
-      p.melds.push({ type: "ankan", tiles: kanTiles, fromSeat: seatIndex, calledTile: null });
+      p.melds.push({
+        type: "ankan",
+        tiles: sortTileIds(actionObj.consumeTileIds),
+        fromSeat: seatIndex,
+        calledTile: null
+      });
     } else {
-      const meld = p.melds.find((m) => m.type === "pon" && tileIdToKind(m.tiles[0]) === targetKind);
-      const addTile = allHand.find((id) => tileIdToKind(id) === targetKind);
-      const remain = allHand.filter((id) => id !== addTile);
-      p.hand = sortTileIds(remain);
-      p.drawnTile = null;
-      meld.type = "kakan";
-      meld.tiles.push(addTile);
+      const addId = actionObj.consumeTileIds[0];
+      const targetKind = tileIdToKind(addId);
+      const targetMeld = p.melds.find((m) => m.type === "pon" && tileIdToKind(m.tiles[0]) === targetKind);
+      if (targetMeld) {
+        targetMeld.type = "kakan";
+        targetMeld.tiles.push(addId);
+      }
     }
 
     state.players.forEach((pl) => (pl.isIppatsu = false));
     revealNewDora(state);
-    return drawRinshanTile(state, seatIndex);
+    drawRinshanTile(state, seatIndex);
+    state.version += 1;
+    state.updatedAt = Date.now();
+    return state;
   }
 
+  // B. 打牌・リーチ宣言
   if (actionObj.action === "discard" || actionObj.action === "riichi") {
-    const allHand = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
+    const allClosed = p.drawnTile !== null ? [...p.hand, p.drawnTile] : [...p.hand];
     const targetId =
       actionObj.tileId !== undefined
         ? actionObj.tileId
-        : findTileIdByLabel(allHand, actionObj.tile, red);
+        : findTileIdByLabel(allClosed, actionObj.tile, red);
 
-    if (targetId === null || !allHand.includes(targetId)) {
+    if (targetId === null || !allClosed.includes(targetId)) {
       throw new Error(`Illegal discard tile: ${actionObj.tile}`);
     }
 
@@ -570,7 +608,7 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     const isRiichiDeclare = actionObj.action === "riichi" && !p.isRiichi;
 
     p.isTempFuriten = false;
-    state.turn.isRinshanTurn = false;
+    state.turn.afterKan = false;
 
     if (isRiichiDeclare) {
       p.isRiichi = true;
@@ -584,7 +622,7 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
 
     const remain = [];
     let removed = false;
-    for (const x of allHand) {
+    for (const x of allClosed) {
       if (!removed && x === targetId) {
         removed = true;
         continue;
@@ -599,7 +637,7 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       isRiichi: isRiichiDeclare,
       calledBy: null
     });
-    p.isFuriten = checkFuriten(p.hand, p.melds, p.discards);
+    p.isFuriten = checkFuriten(p.hand, p.discards, p.melds);
 
     state.turn.lastDiscard = {
       playerIndex: seatIndex,
@@ -619,16 +657,42 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       talk: p.lastTalk
     });
 
+    // 他家のロン・鳴き（ポン・大明槓・チー）対象者を収集
     const claimers = [];
     for (let offset = 1; offset < n; offset++) {
       const otherIdx = (seatIndex + offset) % n;
-      const tempState = structuredClone(state);
-      tempState.turn.phase = "claim_check";
-      tempState.turn.pendingClaims = [otherIdx];
-      const opts = getLegalActions(tempState, otherIdx);
-      if (opts.some((a) => a.action !== "pass")) {
-        claimers.push(otherIdx);
+      const other = state.players[otherIdx];
+      let hasClaim = false;
+
+      const isAnyFuriten = other.isFuriten || other.isTempFuriten || other.isRiichiFuriten;
+      if (!isAnyFuriten) {
+        const ronCheck = evaluateWin({
+          handTileIds: other.hand,
+          winTileId: targetId,
+          melds: other.melds,
+          isTsumo: false,
+          isRiichi: other.isRiichi,
+          isIppatsu: other.isIppatsu,
+          isDealer: otherIdx === state.round.dealerIndex,
+          seatWind: other.wind,
+          roundWind: state.round.wind,
+          doraIndicators: state.wall.doraIndicators,
+          uraDoraIndicators: state.wall.uraDoraIndicators,
+          redDoraEnabled: red
+        });
+        if (ronCheck) hasClaim = true;
       }
+
+      if (state.config.allowCalls && !other.isRiichi && state.wall.remaining >= 2) {
+        const calledKind = tileIdToKind(targetId);
+        const sameCnt = other.hand.filter((id) => tileIdToKind(id) === calledKind).length;
+        if (sameCnt >= 2) hasClaim = true;
+        if (offset === 1 && getChiOptions(other.hand, targetId, red).length > 0) {
+          hasClaim = true;
+        }
+      }
+
+      if (hasClaim) claimers.push(otherIdx);
     }
 
     if (claimers.length > 0) {
@@ -643,11 +707,15 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     return advanceToNextDraw(state, (seatIndex + 1) % n);
   }
 
-  if (["ron", "pon", "daiminkan", "chi", "pass"].includes(actionObj.action)) {
-    const hadRonOption = getLegalActions(prevState, seatIndex).some((a) => a.action === "ron");
-    if (hadRonOption && actionObj.action !== "ron") {
-      p.isTempFuriten = true;
-      if (p.isRiichi) p.isRiichiFuriten = true;
+  // C. 他家打牌への応答（ロン / ポン / 大明槓 / チー / パス）
+  if (["ron", "pon", "minkan", "chi", "pass"].includes(actionObj.action)) {
+    if (actionObj.action === "pass") {
+      // ロン可能だったのを見逃した場合は同巡フリテン
+      const wasRonLegal = getLegalActions(prevState, seatIndex).some((a) => a.action === "ron");
+      if (wasRonLegal) {
+        p.isTempFuriten = true;
+        if (p.isRiichi) p.isRiichiFuriten = true;
+      }
     }
 
     state.turn.claimResponses[seatIndex] = actionObj;
@@ -662,12 +730,12 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     const last = state.turn.lastDiscard;
     const loserIdx = last.playerIndex;
 
+    // 優先度1: ロン（ダブロン・トリロン対応）
     const ronWinners = [];
     for (let offset = 1; offset < n; offset++) {
       const idx = (loserIdx + offset) % n;
-      if (state.turn.claimResponses[idx]?.action === "ron") {
-        ronWinners.push(idx);
-      }
+      const resp = state.turn.claimResponses[idx];
+      if (resp && resp.action === "ron") ronWinners.push(idx);
     }
 
     if (ronWinners.length > 0) {
@@ -678,8 +746,8 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
         const wp = state.players[wIdx];
         const winInfo = evaluateWin({
           handTileIds: wp.hand,
-          melds: wp.melds,
           winTileId: last.tileId,
+          melds: wp.melds,
           isTsumo: false,
           isRiichi: wp.isRiichi,
           isIppatsu: wp.isIppatsu,
@@ -713,24 +781,61 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       return state;
     }
 
-    let ponKanCaller = null;
+    // 優先度2: ポン・大明槓
+    let callerIdx = null;
+    let callAct = null;
     for (let offset = 1; offset < n; offset++) {
       const idx = (loserIdx + offset) % n;
       const resp = state.turn.claimResponses[idx];
-      if (resp && (resp.action === "pon" || resp.action === "daiminkan")) {
-        ponKanCaller = { seatIndex: idx, resp };
+      if (resp && (resp.action === "pon" || resp.action === "minkan")) {
+        callerIdx = idx;
+        callAct = resp;
         break;
       }
     }
 
-    if (ponKanCaller) {
-      return executeCallMeld(state, ponKanCaller.seatIndex, loserIdx, last.tileId, ponKanCaller.resp);
+    // 優先度3: チー
+    if (!callAct) {
+      const shimoIdx = (loserIdx + 1) % n;
+      const resp = state.turn.claimResponses[shimoIdx];
+      if (resp && resp.action === "chi") {
+        callerIdx = shimoIdx;
+        callAct = resp;
+      }
     }
 
-    const shimochaIdx = (loserIdx + 1) % n;
-    const chiResp = state.turn.claimResponses[shimochaIdx];
-    if (chiResp && chiResp.action === "chi") {
-      return executeCallMeld(state, shimochaIdx, loserIdx, last.tileId, chiResp);
+    if (callAct && callerIdx !== null) {
+      const caller = state.players[callerIdx];
+      const consumeSet = new Set(callAct.consumeTileIds);
+      caller.hand = sortTileIds(caller.hand.filter((id) => !consumeSet.has(id)));
+      caller.melds.push({
+        type: callAct.action,
+        tiles: [...callAct.consumeTileIds, last.tileId],
+        fromSeat: loserIdx,
+        calledTile: last.tileId
+      });
+
+      const loserDiscards = state.players[loserIdx].discards;
+      if (loserDiscards.length > 0) {
+        loserDiscards[loserDiscards.length - 1].calledBy = callerIdx;
+      }
+
+      state.players.forEach((pl) => (pl.isIppatsu = false));
+      state.turn.pendingClaims = [];
+      state.turn.claimResponses = {};
+
+      if (callAct.action === "minkan") {
+        revealNewDora(state);
+        drawRinshanTile(state, callerIdx);
+      } else {
+        state.turn.playerIndex = callerIdx;
+        state.turn.phase = "discard";
+        state.turn.afterKan = false;
+      }
+
+      state.version += 1;
+      state.updatedAt = Date.now();
+      return state;
     }
 
     return advanceToNextDraw(state, (loserIdx + 1) % n);
@@ -739,83 +844,32 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
   return state;
 }
 
-function executeCallMeld(state, callerIdx, fromSeatIdx, calledTileId, resp) {
-  const caller = state.players[callerIdx];
-  const fromPlayer = state.players[fromSeatIdx];
-  const red = state.config.redDora;
-  const dk = tileIdToKind(calledTileId);
-
-  state.players.forEach((pl) => (pl.isIppatsu = false));
-
-  const lastRiverItem = fromPlayer.discards[fromPlayer.discards.length - 1];
-  if (lastRiverItem && lastRiverItem.tileId === calledTileId) {
-    lastRiverItem.calledBy = callerIdx;
-  }
-
-  let consumedIds = [];
-  if (resp.action === "pon") {
-    consumedIds = caller.hand.filter((id) => tileIdToKind(id) === dk).slice(0, 2);
-  } else if (resp.action === "daiminkan") {
-    consumedIds = caller.hand.filter((id) => tileIdToKind(id) === dk).slice(0, 3);
-  } else if (resp.action === "chi") {
-    const consumeLabels = Array.isArray(resp.consume) ? resp.consume : [];
-    consumedIds = findMultipleTileIdsByLabels(caller.hand, consumeLabels, red);
-    if (!consumedIds || consumedIds.length !== 2) {
-      const fallbackPair = getChiOptions(caller.hand, calledTileId, red)[0];
-      consumedIds = findMultipleTileIdsByLabels(caller.hand, fallbackPair, red);
-    }
-  }
-
-  caller.hand = sortTileIds(caller.hand.filter((id) => !consumedIds.includes(id)));
-  const meldTiles = sortTileIds([...consumedIds, calledTileId]);
-  caller.melds.push({
-    type: resp.action,
-    tiles: meldTiles,
-    fromSeat: fromSeatIdx,
-    calledTile: calledTileId
-  });
-  caller.isFuriten = checkFuriten(caller.hand, caller.melds, caller.discards);
-
-  state.turn.phase = "discard";
-  state.turn.playerIndex = callerIdx;
-  state.turn.pendingClaims = [];
-  state.turn.claimResponses = {};
-
-  if (resp.action === "daiminkan") {
-    revealNewDora(state);
-    return drawRinshanTile(state, callerIdx);
-  }
-
-  caller.drawnTile = null;
-  state.turn.isRinshanTurn = false;
-  state.version += 1;
-  state.updatedAt = Date.now();
-  return state;
-}
-
 function revealNewDora(state) {
-  state.wall.kanCount += 1;
-  const nextIndIdx = 4 + state.wall.kanCount * 2;
-  const nextUraIdx = 5 + state.wall.kanCount * 2;
-  if (state.wall.dead[nextIndIdx] !== undefined) {
-    state.wall.doraIndicators.push(state.wall.dead[nextIndIdx]);
-  }
-  if (state.wall.dead[nextUraIdx] !== undefined) {
-    state.wall.uraDoraIndicators.push(state.wall.dead[nextUraIdx]);
+  const kanCount = state.wall.doraIndicators.length;
+  if (kanCount < 5) {
+    const doraIdx = 4 + kanCount * 2;
+    const uraIdx = 5 + kanCount * 2;
+    if (state.wall.dead[doraIdx] !== undefined) {
+      state.wall.doraIndicators.push(state.wall.dead[doraIdx]);
+    }
+    if (state.wall.dead[uraIdx] !== undefined) {
+      state.wall.uraDoraIndicators.push(state.wall.dead[uraIdx]);
+    }
   }
 }
 
 function drawRinshanTile(state, seatIndex) {
-  const player = state.players[seatIndex];
-  const rinshanTile = state.wall.dead.shift();
-  player.drawnTile = rinshanTile !== undefined ? rinshanTile : state.wall.live.shift();
+  const p = state.players[seatIndex];
+  const rinshanTile = state.wall.dead[state.wall.rinshanIndex] ?? state.wall.live.shift();
+  state.wall.rinshanIndex += 1;
+  if (state.wall.live.length > 0) {
+    state.wall.live.pop();
+  }
   state.wall.remaining = state.wall.live.length;
+  p.drawnTile = rinshanTile;
   state.turn.playerIndex = seatIndex;
   state.turn.phase = "discard";
-  state.turn.isRinshanTurn = true;
-  state.version += 1;
-  state.updatedAt = Date.now();
-  return state;
+  state.turn.afterKan = true;
 }
 
 function advanceToNextDraw(state, nextSeatIndex) {
@@ -823,8 +877,8 @@ function advanceToNextDraw(state, nextSeatIndex) {
     const n = state.players.length;
     const tenpaiSeats = [];
     for (let i = 0; i < n; i++) {
-      const p = state.players[i];
-      if (calcShanten(toCounts34(p.hand), p.melds.length) === 0) {
+      const pl = state.players[i];
+      if (calcShanten(toCounts34(pl.hand), pl.melds.length) === 0) {
         tenpaiSeats.push(i);
       }
     }
@@ -856,9 +910,9 @@ function advanceToNextDraw(state, nextSeatIndex) {
 
   state.turn.playerIndex = nextSeatIndex;
   state.turn.phase = "discard";
-  state.turn.isRinshanTurn = false;
   state.turn.pendingClaims = [];
   state.turn.claimResponses = {};
+  state.turn.afterKan = false;
   if (nextSeatIndex === state.round.dealerIndex) {
     state.turn.turnCount += 1;
   }
@@ -869,44 +923,31 @@ function advanceToNextDraw(state, nextSeatIndex) {
 
 export function chooseFallbackAction(state, seatIndex) {
   const legal = getLegalActions(state, seatIndex);
-  const p = state.players[seatIndex];
-  const persona = p.aiConfig?.personaId || "digital_balanced";
-  const red = state.config.redDora;
-
   const tsumo = legal.find((a) => a.action === "tsumo");
   if (tsumo) return tsumo;
+
   const ron = legal.find((a) => a.action === "ron");
   if (ron) return ron;
 
   if (state.turn.phase === "claim_check") {
-    const passAct = legal.find((a) => a.action === "pass") || legal[0];
-    if (persona === "iron_defense") return passAct;
-
-    const currentShanten = calcShanten(toCounts34(p.hand), p.melds.length);
-    const last = state.turn.lastDiscard;
-    const dk = tileIdToKind(last.tileId);
-    const isYakuhai =
-      dk >= 31 ||
-      (dk === 27 && p.wind === "E") ||
-      (dk === 28 && p.wind === "S") ||
-      (dk === 29 && p.wind === "W") ||
-      (dk === 30 && p.wind === "N");
-
+    const p = state.players[seatIndex];
+    const beforeShanten = calcShanten(toCounts34(p.hand), p.melds.length);
     const ponAct = legal.find((a) => a.action === "pon");
     if (ponAct) {
-      if (isYakuhai) return ponAct;
-      if (persona === "aggressive_riichi" && currentShanten <= 2) return ponAct;
-      if (persona === "occult_flow" && currentShanten <= 1) return ponAct;
+      const remain = p.hand.filter((id) => !ponAct.consumeTileIds.includes(id));
+      const afterShanten = calcShanten(toCounts34(remain), p.melds.length + 1);
+      if (afterShanten < beforeShanten) return ponAct;
     }
-
     const chiAct = legal.find((a) => a.action === "chi");
-    if (chiAct && (persona === "aggressive_riichi" || persona === "occult_flow") && currentShanten === 1) {
-      return chiAct;
+    if (chiAct && beforeShanten <= 1) {
+      const remain = p.hand.filter((id) => !chiAct.consumeTileIds.includes(id));
+      const afterShanten = calcShanten(toCounts34(remain), p.melds.length + 1);
+      if (afterShanten < beforeShanten) return chiAct;
     }
-
-    return passAct;
+    return legal.find((a) => a.action === "pass") || legal[0];
   }
 
+  const p = state.players[seatIndex];
   const visible = [];
   state.players.forEach((pl) => {
     pl.discards.forEach((d) => visible.push(d.tileId));
@@ -918,54 +959,14 @@ export function chooseFallbackAction(state, seatIndex) {
     p.hand,
     p.drawnTile,
     visible,
-    red,
+    state.config.redDora,
     p.melds.length
   );
-  if (candidates.length === 0) return legal[0];
-
-  const riichiOpponents = state.players.filter((pl) => pl.seatIndex !== seatIndex && pl.isRiichi);
-  const safeKinds = new Set();
-  for (const opp of riichiOpponents) {
-    opp.discards.forEach((d) => safeKinds.add(tileIdToKind(d.tileId)));
-  }
-
-  if (
-    riichiOpponents.length > 0 &&
-    (persona === "iron_defense" || (persona === "digital_balanced" && candidates[0].shantenAfter >= 2))
-  ) {
-    const safeCand = candidates.find((c) => safeKinds.has(c.kindId));
-    if (safeCand) {
-      const dAct = legal.find((a) => a.action === "discard" && a.tile === safeCand.label);
-      if (dAct) return dAct;
-    }
-  }
-
-  const doraKinds = new Set(state.wall.doraIndicators.map(indicatorToDoraKind));
-  const scored = candidates.map((c) => {
-    let score = -c.shantenAfter * 100 + c.acceptanceCount;
-    const isDora = doraKinds.has(c.kindId) || c.label.startsWith("0");
-
-    if (persona === "occult_flow") {
-      if (isDora) score -= 45;
-    } else if (persona === "iron_defense") {
-      if (safeKinds.has(c.kindId)) score -= 18;
-    } else if (persona === "aggressive_riichi") {
-      score += c.acceptanceCount * 0.5;
-    }
-    return { cand: c, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  const best = scored[0].cand;
+  const best = candidates[0];
+  if (!best) return legal[0];
 
   const riichiOpt = legal.find((a) => a.action === "riichi" && a.tile === best.label);
-  if (riichiOpt) {
-    if (persona === "iron_defense" && riichiOpponents.length > 0 && best.acceptanceCount <= 3) {
-      // 守備派は追っかけ愚形リーチをダマに構える
-    } else {
-      return riichiOpt;
-    }
-  }
+  if (riichiOpt) return riichiOpt;
 
   const discardOpt = legal.find((a) => a.action === "discard" && a.tile === best.label);
   return discardOpt || legal[0];
