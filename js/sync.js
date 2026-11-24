@@ -1,20 +1,19 @@
 /**
  * sync.js
- * [ver.1.0 拡張用インターフェース]
- * ver.0 ではローカルメモリで完結し、ver.1.0 で GAS Webアプリ（Roomsシート）通信に差し替える。
+ * [ver.1.0 GASオンライン対戦拡張用インターフェース]
+ * ver.0.2 では localStorage への自動保存と連携し、ver.1.0 で GAS Webアプリへ差し替える。
  */
 
-export class LocalSyncAdapter {
-  constructor() {
-    this.latestState = null;
-  }
+import { saveMatchSession, loadMatchSession } from "./storage.js";
 
-  async saveState(state) {
-    this.latestState = structuredClone(state);
-    return this.latestState;
+export class LocalSyncAdapter {
+  async saveState(state, logs = []) {
+    saveMatchSession(state, logs);
+    return state;
   }
 
   async fetchState() {
-    return this.latestState;
+    const session = loadMatchSession();
+    return session ? session.gameState : null;
   }
 }
