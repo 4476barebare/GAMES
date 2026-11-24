@@ -4,8 +4,6 @@
  * プレビュー画像準拠: 1m..9m, 0m, 1p..9p, 0p, 1s..9s, 0s, 1z..7z, back
  */
 
-import { tileIdToLabel } from "./tiles.js";
-
 export const TILE_SVGS = {
   "back": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 60 84\" class=\"tile-svg\" aria-hidden=\"true\"><rect x=\"1\" y=\"1\" width=\"58\" height=\"82\" rx=\"6\" fill=\"#1e3a8a\"/><rect x=\"2\" y=\"2\" width=\"56\" height=\"77\" rx=\"5\" fill=\"#1e40af\" stroke=\"#60a5fa\" stroke-width=\"1\"/><rect x=\"6.5\" y=\"6.5\" width=\"47\" height=\"68\" rx=\"3\" fill=\"none\" stroke=\"rgba(255,255,255,0.85)\" stroke-width=\"1.2\"/><rect x=\"9.5\" y=\"9.5\" width=\"41\" height=\"62\" rx=\"2\" fill=\"none\" stroke=\"rgba(255,255,255,0.5)\" stroke-width=\"0.9\"/></svg>",
   "1m": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 60 84\" class=\"tile-svg\" aria-hidden=\"true\"><rect x=\"1\" y=\"1\" width=\"58\" height=\"82\" rx=\"6\" fill=\"#d6d3c9\"/><rect x=\"2\" y=\"2\" width=\"56\" height=\"77\" rx=\"5\" fill=\"#fdfcf7\" stroke=\"#cbd5e1\" stroke-width=\"1\"/><text x=\"30\" y=\"34\" text-anchor=\"middle\" font-family=\"'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', 'MS PMincho', serif\" font-size=\"25\" font-weight=\"900\" fill=\"#111827\">一</text><text x=\"30\" y=\"66\" text-anchor=\"middle\" font-family=\"'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', 'MS PMincho', serif\" font-size=\"27\" font-weight=\"900\" fill=\"#9b111e\">萬</text></svg>",
@@ -47,15 +45,22 @@ export const TILE_SVGS = {
   "7z": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 60 84\" class=\"tile-svg\" aria-hidden=\"true\"><rect x=\"1\" y=\"1\" width=\"58\" height=\"82\" rx=\"6\" fill=\"#d6d3c9\"/><rect x=\"2\" y=\"2\" width=\"56\" height=\"77\" rx=\"5\" fill=\"#fdfcf7\" stroke=\"#cbd5e1\" stroke-width=\"1\"/><text x=\"30\" y=\"54\" text-anchor=\"middle\" font-family=\"'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', 'MS PMincho', serif\" font-size=\"38\" font-weight=\"900\" fill=\"#9b111e\">中</text></svg>"
 };
 
+const HONOR_ALIAS = {
+  "東": "1z",
+  "南": "2z",
+  "西": "3z",
+  "北": "4z",
+  "白": "5z",
+  "發": "6z",
+  "中": "7z"
+};
+
 export function getTileSvg(code) {
-  const svg = TILE_SVGS[String(code)];
+  const raw = String(code);
+  const key = HONOR_ALIAS[raw] || raw;
+  const svg = TILE_SVGS[key];
   if (!svg) throw new Error(`Unknown tile code: ${code}`);
   return svg;
-}
-
-export function getTileSvgById(tileId, redDoraEnabled = true) {
-  const code = tileIdToLabel(tileId, redDoraEnabled, false);
-  return getTileSvg(code);
 }
 
 export function getAllTileSvgs() {

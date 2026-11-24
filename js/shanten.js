@@ -1,6 +1,6 @@
 /**
  * shanten.js
- * 副露（鳴き）対応シャンテン数計算・受け入れ枚数・待ち牌解析
+ * シャンテン数計算（副露数 meldCount 対応：通常手・七対子・国士無双）および受け入れ解析
  */
 
 import { tileIdToKind, tileIdToLabel, kindToLabel, toCounts34 } from "./tiles.js";
@@ -105,16 +105,16 @@ export function calcShanten(counts, meldCount = 0) {
   return Math.min(std, chiitoi, kokushi);
 }
 
-export function getEffectiveTiles(countsRemain, visibleCounts, meldCount = 0) {
-  const baseShanten = calcShanten(countsRemain, meldCount);
+export function getEffectiveTiles(counts13, visibleCounts, meldCount = 0) {
+  const baseShanten = calcShanten(counts13, meldCount);
   const waits = [];
   let totalRemaining = 0;
 
   for (let k = 0; k < 34; k++) {
-    if (countsRemain[k] >= 4) continue;
-    countsRemain[k]++;
-    const nextShanten = calcShanten(countsRemain, meldCount);
-    countsRemain[k]--;
+    if (counts13[k] >= 4) continue;
+    counts13[k]++;
+    const nextShanten = calcShanten(counts13, meldCount);
+    counts13[k]--;
 
     if (nextShanten < baseShanten) {
       const rem = Math.max(0, 4 - visibleCounts[k]);
@@ -134,7 +134,13 @@ export function getEffectiveTiles(countsRemain, visibleCounts, meldCount = 0) {
   };
 }
 
-export function analyzeDiscardCandidates(handTileIds, drawnTileId, visibleTileIds, redDora = true, meldCount = 0) {
+export function analyzeDiscardCandidates(
+  handTileIds,
+  drawnTileId,
+  visibleTileIds,
+  redDora = true,
+  meldCount = 0
+) {
   const allTiles = drawnTileId !== null ? [...handTileIds, drawnTileId] : [...handTileIds];
   const visibleCounts = toCounts34([...allTiles, ...visibleTileIds]);
 

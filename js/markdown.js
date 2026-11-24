@@ -1,6 +1,6 @@
 /**
  * markdown.js
- * 4人麻雀（半荘・鳴きアリ）の局面レポートMarkdown生成
+ * 4人麻雀（半荘・鳴きあり）の局面レポートMarkdown生成
  */
 
 import { tileIdToLabel, indicatorToDoraKind, kindToLabel } from "./tiles.js";
@@ -8,7 +8,13 @@ import { analyzeDiscardCandidates } from "./shanten.js";
 import { getLegalActions } from "./engine.js";
 
 const WIND_JP = { E: "東", S: "南", W: "西", N: "北" };
-const MELD_LABEL = { chi: "チー", pon: "ポン", minkan: "大明槓", ankan: "暗槓", kakan: "加槓" };
+const MELD_JP = {
+  chi: "チー",
+  pon: "ポン",
+  daiminkan: "大明槓",
+  ankan: "暗槓",
+  kakan: "加槓"
+};
 
 export function buildTurnPromptMarkdown(state, seatIndex) {
   const me = state.players[seatIndex];
@@ -24,6 +30,7 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
   );
   const myRank = ranked.findIndex((p) => p.seatIndex === seatIndex) + 1;
   const topDiff = me.points - ranked[0].points;
+  const isMenzen = me.melds.every((m) => m.type === "ankan");
 
   const lines = [];
   lines.push(
@@ -34,18 +41,20 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
   lines.push(
     `- **あなた:** ${WIND_JP[me.wind]}家（現在${myRank}位 / 持ち点: ${me.points.toLocaleString()}点 / トップ差: ${
       topDiff >= 0 ? "トップ" : topDiff.toLocaleString()
-    }点 / 状態: ${me.isRiichi ? "リーチ中" : me.melds.length > 0 ? "副露中" : "門前"}）`
+    }点 / 状態: ${me.isRiichi ? "リーチ中" : isMenzen ? "門前" : "副露あり"}）`
   );
   lines.push(`- **ドラ表示牌:** ${doraIndStr}（現ドラ: ${actualDoraStr}）`);
   lines.push(
     `- **現在のフェーズ:** ${
-      state.turn.phase === "claim_check" ? "他家の打牌に対するロン・鳴き判定" : "あなたの打牌選択（ツモ・鳴き後）"
+      state.turn.phase === "claim_check"
+        ? "他家の打牌に対するロン・鳴き（ポン/チー/カン）判定"
+        : "あなたの打牌・ツモ和了・暗槓/加槓選択"
     }`
   );
   lines.push("");
 
-  lines.push("## 2. 4家の状況（河・副露・持ち点）");
-  lines.push("| 席 | 名前 | 持ち点 | リーチ | 副露（鳴き） | 捨て牌（古い順 / `*`ツモ切り / `[R]`リーチ宣言） |");
+  lines.push("## 2. 4家の状況（河・鳴き・持ち点）");
+  lines.push("| 席 | 名前 | 持ち点 | 状態 | 副露（鳴き） | 捨て牌（古い順 / `*`ツモ切り / `[R]`リーチ） |");
   lines.push("| :--- | :--- | ---: | :---: | :--- | :--- |");
 
   for (const pl of state.players) {
@@ -53,25 +62,27 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
     const seatLabel = isMe ? `**${WIND_JP[pl.wind]} (YOU)**` : WIND_JP[pl.wind];
     const nameLabel = isMe ? `**${pl.name}**` : pl.name;
     const ptsLabel = isMe ? `**${pl.points.toLocaleString()}**` : pl.points.toLocaleString();
-    const riichiLabel = pl.isRiichi ? "リーチ" : "-";
+    const statusLabel = pl.isRiichi ? "リーチ" : pl.melds.length > 0 ? "副露" : "門前";
     const meldsStr =
       pl.melds.length === 0
-        ? "門前"
+        ? "なし"
         : pl.melds
-            .map((m) => `${MELD_LABEL[m.type]}[${m.tiles.map((id) => tileIdToLabel(id, red)).join("")}]`)
-            .join(" ");
+            .map((m) => `${MELD_JP[m.type]}[${m.tiles.map((t) => tileIdToLabel(t, red)).join("")}]`)
+            .join(", ");
+
     const riverStr =
       pl.discards.length === 0
         ? "なし"
         : pl.discards
+            .filter((d) => d.calledBy === null)
             .map((d) => {
               let t = tileIdToLabel(d.tileId, red);
               if (d.isTsumogiri) t += "*";
               if (d.isRiichi) t += "[R]";
               return `\`${t}\``;
             })
-            .join(", ");
-    lines.push(`| ${seatLabel} | ${nameLabel} | ${ptsLabel} | ${riichiLabel} | ${meldsStr} | ${riverStr} |`);
+            .join(", ") || "なし";
+    lines.push(`| ${seatLabel} | ${nameLabel} | ${ptsLabel} | ${statusLabel} | ${meldsStr} | ${riverStr} |`);
   }
   lines.push("");
 
@@ -82,8 +93,12 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
     lines.push(`- **今ツモった牌:** \`${tileIdToLabel(me.drawnTile, red)}\``);
   }
   if (state.turn.phase === "claim_check" && state.turn.lastDiscard) {
+    const discarder = state.players[state.turn.lastDiscard.playerIndex];
     lines.push(
-      `- **直前の相手の捨て牌（ロン・鳴き対象）:** \`${tileIdToLabel(state.turn.lastDiscard.tileId, red)}\``
+      `- **直前の捨て牌（${WIND_JP[discarder.wind]}家・${discarder.name}）:** \`${tileIdToLabel(
+        state.turn.lastDiscard.tileId,
+        red
+      )}\``
     );
   }
   const furiten = me.isFuriten || me.isTempFuriten || me.isRiichiFuriten;
@@ -126,28 +141,38 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
   for (const act of legalActions) {
     if (act.action === "tsumo") {
       lines.push(
-        `- \`{"action": "tsumo", "tile": "${act.tile}"}\` （ツモ和了！ ${act.winInfo.label} ${act.winInfo.points}点）`
+        `- \`{"action": "tsumo", "tile": "${act.tile}", "consume": []}\` （ツモ和了！ ${act.winInfo.label} ${act.winInfo.points}点）`
       );
     } else if (act.action === "ron") {
       lines.push(
-        `- \`{"action": "ron", "tile": "${act.tile}"}\` （ロン和了！ ${act.winInfo.label} ${act.winInfo.points}点）`
+        `- \`{"action": "ron", "tile": "${act.tile}", "consume": []}\` （ロン和了！ ${act.winInfo.label} ${act.winInfo.points}点）`
       );
     } else if (act.action === "riichi") {
-      lines.push(`- \`{"action": "riichi", "tile": "${act.tile}"}\` （${act.tile}を切ってリーチ宣言）`);
-    } else if (act.action === "pon") {
-      lines.push(`- \`{"action": "pon", "tile": "${act.tile}"}\` （${act.tile}をポン）`);
-    } else if (act.action === "chi") {
-      lines.push(`- \`{"action": "chi", "tile": "${act.tile}", "chiLabel": "${act.chiLabel}"}\` （${act.chiLabel}でチー）`);
-    } else if (act.action === "minkan") {
-      lines.push(`- \`{"action": "minkan", "tile": "${act.tile}"}\` （${act.tile}を大明槓）`);
-    } else if (act.action === "ankan") {
-      lines.push(`- \`{"action": "ankan", "tile": "${act.tile}"}\` （${act.tile}を暗槓）`);
-    } else if (act.action === "kakan") {
-      lines.push(`- \`{"action": "kakan", "tile": "${act.tile}"}\` （${act.tile}を加槓）`);
+      lines.push(
+        `- \`{"action": "riichi", "tile": "${act.tile}", "consume": []}\` （${act.tile}を切ってリーチ宣言）`
+      );
     } else if (act.action === "discard") {
-      lines.push(`- \`{"action": "discard", "tile": "${act.tile}"}\` （${act.tile}を切る）`);
+      lines.push(
+        `- \`{"action": "discard", "tile": "${act.tile}", "consume": []}\` （${act.tile}を切る）`
+      );
+    } else if (act.action === "pon") {
+      lines.push(`- \`{"action": "pon", "tile": "${act.tile}", "consume": []}\` （${act.tile}をポン）`);
+    } else if (act.action === "daiminkan") {
+      lines.push(
+        `- \`{"action": "daiminkan", "tile": "${act.tile}", "consume": []}\` （${act.tile}を大明槓）`
+      );
+    } else if (act.action === "ankan") {
+      lines.push(`- \`{"action": "ankan", "tile": "${act.tile}", "consume": []}\` （${act.tile}を暗槓）`);
+    } else if (act.action === "kakan") {
+      lines.push(`- \`{"action": "kakan", "tile": "${act.tile}", "consume": []}\` （${act.tile}を加槓）`);
+    } else if (act.action === "chi") {
+      lines.push(
+        `- \`{"action": "chi", "tile": "${act.tile}", "consume": ${JSON.stringify(
+          act.consume
+        )}}\` （${act.consume.join("・")}で${act.tile}をチー）`
+      );
     } else if (act.action === "pass") {
-      lines.push(`- \`{"action": "pass", "tile": ""}\` （スルー・見送り）`);
+      lines.push(`- \`{"action": "pass", "tile": "", "consume": []}\` （見送り / スルー）`);
     }
   }
 

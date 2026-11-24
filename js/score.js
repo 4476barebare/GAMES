@@ -1,18 +1,19 @@
 /**
  * score.js
- * 4人麻雀対応 副露（鳴き・喰い下がり・喰いタン）対応 面子分解・役判定・符計算・点数計算・フリテン判定
+ * 副露（チー・ポン・大明槓・暗槓・加槓）完全対応 面子分解・役判定・喰い下がり・符計算・フリテン判定
  */
 
 import { tileIdToKind, isRedDora, indicatorToDoraKind, toCounts34 } from "./tiles.js";
 import { calcChiitoiShanten, calcKokushiShanten } from "./shanten.js";
 
-export function decomposeStandard(counts, targetMentsuCount = 4) {
+export function decomposeHandWithMelds(concealedCounts, meldCount = 0) {
+  const neededMentsu = 4 - meldCount;
   const results = [];
 
   function extractMentsu(c, pos, mentsuList) {
     while (pos < 34 && c[pos] === 0) pos++;
     if (pos >= 34) {
-      if (mentsuList.length === targetMentsuCount) {
+      if (mentsuList.length === neededMentsu) {
         results.push(mentsuList.map((m) => ({ ...m })));
       }
       return;
@@ -20,7 +21,7 @@ export function decomposeStandard(counts, targetMentsuCount = 4) {
 
     if (c[pos] >= 3) {
       c[pos] -= 3;
-      mentsuList.push({ type: "koutsu", kind: pos, open: false });
+      mentsuList.push({ type: "koutsu", kind: pos, isOpen: false });
       extractMentsu(c, pos, mentsuList);
       mentsuList.pop();
       c[pos] += 3;
@@ -30,7 +31,7 @@ export function decomposeStandard(counts, targetMentsuCount = 4) {
       c[pos]--;
       c[pos + 1]--;
       c[pos + 2]--;
-      mentsuList.push({ type: "shuntsu", kind: pos, open: false });
+      mentsuList.push({ type: "shuntsu", kind: pos, isOpen: false });
       extractMentsu(c, pos, mentsuList);
       mentsuList.pop();
       c[pos]++;
@@ -40,13 +41,13 @@ export function decomposeStandard(counts, targetMentsuCount = 4) {
   }
 
   for (let head = 0; head < 34; head++) {
-    if (counts[head] >= 2) {
-      const c = [...counts];
+    if (concealedCounts[head] >= 2) {
+      const c = [...concealedCounts];
       c[head] -= 2;
       const beforeLen = results.length;
       extractMentsu(c, 0, []);
       for (let i = beforeLen; i < results.length; i++) {
-        results[i] = { head, mentsu: results[i] };
+        results[i] = { head, concealedMentsu: results[i] };
       }
     }
   }
@@ -67,27 +68,24 @@ function windToKind(windChar) {
   return 30;
 }
 
-function meldToMentsuObj(meld) {
+function parseMeldMentsu(meld) {
   const kinds = meld.tiles.map(tileIdToKind).sort((a, b) => a - b);
   if (meld.type === "chi") {
-    return { type: "shuntsu", kind: kinds[0], open: true };
+    return { type: "shuntsu", kind: kinds[0], isOpen: true, isKan: false };
   }
+  const isKan = meld.type === "daiminkan" || meld.type === "ankan" || meld.type === "kakan";
   const isOpen = meld.type !== "ankan";
-  return {
-    type: "koutsu",
-    kind: kinds[0],
-    open: isOpen,
-    isKan: meld.type === "ankan" || meld.type === "minkan" || meld.type === "kakan"
-  };
+  return { type: "koutsu", kind: kinds[0], isOpen, isKan };
 }
 
 export function evaluateWin({
   handTileIds,
-  winTileId,
   melds = [],
+  winTileId,
   isTsumo,
   isRiichi,
   isIppatsu,
+  isRinshan = false,
   isDealer,
   seatWind,
   roundWind,
@@ -95,17 +93,18 @@ export function evaluateWin({
   uraDoraIndicators,
   redDoraEnabled = true
 }) {
-  const closedTiles = [...handTileIds, winTileId];
-  const expectedClosedLen = 14 - melds.length * 3;
-  if (closedTiles.length !== expectedClosedLen) return null;
-
-  const meldTiles = melds.flatMap((m) => m.tiles);
-  const allTiles = [...closedTiles, ...meldTiles];
-  const countsClosed = toCounts34(closedTiles);
-  const countsAll = toCounts34(allTiles);
-  const winKind = tileIdToKind(winTileId);
+  const concealed14 = [...handTileIds, winTileId];
+  const expectedLen = 14 - melds.length * 3;
+  if (concealed14.length !== expectedLen) return null;
 
   const isMenzen = melds.every((m) => m.type === "ankan");
+  const parsedMelds = melds.map(parseMeldMentsu);
+
+  const allTiles = [...concealed14];
+  for (const m of melds) allTiles.push(...m.tiles);
+  const allCounts = toCounts34(allTiles);
+  const concealedCounts = toCounts34(concealed14);
+  const winKind = tileIdToKind(winTileId);
 
   const doraKinds = doraIndicators.map(indicatorToDoraKind);
   const uraKinds = isRiichi ? uraDoraIndicators.map(indicatorToDoraKind) : [];
@@ -122,27 +121,25 @@ export function evaluateWin({
 
   const candidateResults = [];
 
-  // 1. 国士無双（門前のみ）
-  if (melds.length === 0 && calcKokushiShanten(countsClosed) === -1) {
+  if (melds.length === 0 && calcKokushiShanten(concealedCounts) === -1) {
     return buildFinalScore(13, 0, isDealer, isTsumo, [{ name: "国士無双", han: 13 }], true);
   }
 
-  // 2. 七対子（門前のみ）
-  if (melds.length === 0 && calcChiitoiShanten(countsClosed) === -1) {
+  if (melds.length === 0 && calcChiitoiShanten(concealedCounts) === -1) {
     const yakus = [{ name: "七対子", han: 2 }];
     if (isRiichi) yakus.push({ name: "リーチ", han: 1 });
     if (isIppatsu) yakus.push({ name: "一発", han: 1 });
     if (isTsumo) yakus.push({ name: "門前清自摸和", han: 1 });
 
-    const allTanyao = countsAll.every((cnt, k) => cnt === 0 || !isTerminalOrHonor(k));
+    const allTanyao = allCounts.every((cnt, k) => cnt === 0 || !isTerminalOrHonor(k));
     if (allTanyao) yakus.push({ name: "断幺九", han: 1 });
 
-    const allTermHonor = countsAll.every((cnt, k) => cnt === 0 || isTerminalOrHonor(k));
+    const allTermHonor = allCounts.every((cnt, k) => cnt === 0 || isTerminalOrHonor(k));
     if (allTermHonor) yakus.push({ name: "混老頭", han: 2 });
 
     const suits = new Set();
     let hasHonor = false;
-    countsAll.forEach((cnt, k) => {
+    allCounts.forEach((cnt, k) => {
       if (cnt === 0) return;
       if (k >= 27) hasHonor = true;
       else suits.add(Math.floor(k / 9));
@@ -162,18 +159,18 @@ export function evaluateWin({
     candidateResults.push(buildFinalScore(totalHan, 25, isDealer, isTsumo, yakus));
   }
 
-  // 3. 通常手（副露面子＋手牌面子分解）
-  const fixedMentsu = melds.map(meldToMentsuObj);
-  const decompositions = decomposeStandard(countsClosed, 4 - melds.length);
+  const decompositions = decomposeHandWithMelds(concealedCounts, melds.length);
   const seatWindKind = windToKind(seatWind);
   const roundWindKind = windToKind(roundWind);
 
   for (const dec of decompositions) {
-    const allMentsu = [...fixedMentsu, ...dec.mentsu];
+    const allMentsu = [...dec.concealedMentsu, ...parsedMelds];
     const yakus = [];
+
     if (isMenzen && isRiichi) yakus.push({ name: "リーチ", han: 1 });
     if (isMenzen && isIppatsu) yakus.push({ name: "一発", han: 1 });
     if (isMenzen && isTsumo) yakus.push({ name: "門前清自摸和", han: 1 });
+    if (isRinshan && isTsumo) yakus.push({ name: "嶺上開花", han: 1 });
 
     const koutsuList = allMentsu.filter((m) => m.type === "koutsu");
     const shuntsuList = allMentsu.filter((m) => m.type === "shuntsu");
@@ -184,15 +181,19 @@ export function evaluateWin({
       return buildFinalScore(13, 0, isDealer, isTsumo, [{ name: "大三元", han: 13 }], true);
     }
     const concealedKoutsu = koutsuList.filter(
-      (m) => !m.open && (isTsumo || m.kind !== winKind)
+      (m) => !m.isOpen && (isTsumo || m.kind !== winKind)
     ).length;
     if (concealedKoutsu === 4) {
       return buildFinalScore(13, 0, isDealer, isTsumo, [{ name: "四暗刻", han: 13 }], true);
     }
+    const kanCount = allMentsu.filter((m) => m.isKan).length;
+    if (kanCount === 4) {
+      return buildFinalScore(13, 0, isDealer, isTsumo, [{ name: "四槓子", han: 13 }], true);
+    }
 
     const suits = new Set();
     let hasHonor = false;
-    countsAll.forEach((cnt, k) => {
+    allCounts.forEach((cnt, k) => {
       if (cnt === 0) return;
       if (k >= 27) hasHonor = true;
       else suits.add(Math.floor(k / 9));
@@ -201,11 +202,9 @@ export function evaluateWin({
       return buildFinalScore(13, 0, isDealer, isTsumo, [{ name: "字一色", han: 13 }], true);
     }
 
-    // 喰いタンあり
-    const allTanyao = countsAll.every((cnt, k) => cnt === 0 || !isTerminalOrHonor(k));
+    const allTanyao = allCounts.every((cnt, k) => cnt === 0 || !isTerminalOrHonor(k));
     if (allTanyao) yakus.push({ name: "断幺九", han: 1 });
 
-    // 役牌（鳴いても1翻）
     for (const m of koutsuList) {
       if (m.kind === 31) yakus.push({ name: "役牌:白", han: 1 });
       if (m.kind === 32) yakus.push({ name: "役牌:發", han: 1 });
@@ -218,13 +217,12 @@ export function evaluateWin({
       yakus.push({ name: "小三元", han: 2 });
     }
 
-    // 平和（門前のみ）
     const allShuntsu = shuntsuList.length === 4;
     const headIsValue =
       dec.head >= 31 || dec.head === seatWindKind || dec.head === roundWindKind;
     let isRyanmen = false;
     if (isMenzen && allShuntsu && !headIsValue) {
-      for (const m of dec.mentsu) {
+      for (const m of dec.concealedMentsu) {
         if (m.type !== "shuntsu") continue;
         const n = m.kind % 9;
         if (m.kind === winKind && n !== 6) isRyanmen = true;
@@ -233,7 +231,6 @@ export function evaluateWin({
       if (isRyanmen) yakus.push({ name: "平和", han: 1 });
     }
 
-    // 一盃口・二盃口（門前のみ）
     if (isMenzen) {
       const shuntsuMap = new Map();
       for (const sk of shuntsuKinds) shuntsuMap.set(sk, (shuntsuMap.get(sk) || 0) + 1);
@@ -245,8 +242,8 @@ export function evaluateWin({
 
     if (koutsuList.length === 4) yakus.push({ name: "対々和", han: 2 });
     if (concealedKoutsu === 3) yakus.push({ name: "三暗刻", han: 2 });
+    if (kanCount === 3) yakus.push({ name: "三槓子", han: 2 });
 
-    // 三色同順（喰い下がり1翻）
     for (let n = 0; n <= 6; n++) {
       if (
         shuntsuKinds.includes(n) &&
@@ -258,7 +255,6 @@ export function evaluateWin({
       }
     }
 
-    // 一気通貫（喰い下がり1翻）
     for (let s = 0; s < 3; s++) {
       const base = s * 9;
       if (
@@ -271,7 +267,6 @@ export function evaluateWin({
       }
     }
 
-    // チャンタ・ジュンチャン（喰い下がり1翻）
     const allMentsuHasTerm = allMentsu.every((m) =>
       m.type === "koutsu"
         ? isTerminalOrHonor(m.kind)
@@ -282,7 +277,11 @@ export function evaluateWin({
       else yakus.push({ name: "混全帯幺九", han: isMenzen ? 2 : 1 });
     }
 
-    // 混一色・清一色（喰い下がり1翻）
+    const allTermHonor = allCounts.every((cnt, k) => cnt === 0 || isTerminalOrHonor(k));
+    if (allTermHonor && shuntsuList.length === 0) {
+      yakus.push({ name: "混老頭", han: 2 });
+    }
+
     if (suits.size === 1) {
       if (hasHonor) yakus.push({ name: "混一色", han: isMenzen ? 3 : 2 });
       else yakus.push({ name: "清一色", han: isMenzen ? 6 : 5 });
@@ -296,11 +295,13 @@ export function evaluateWin({
 
     const totalHan = yakus.reduce((s, y) => s + y.han, 0);
 
-    let fu = isMenzen ? (isTsumo ? 30 : 40) : 30;
-    if (isMenzen && allShuntsu && isRyanmen) {
-      fu = isTsumo ? 20 : 30;
-    } else if (koutsuList.length >= 2) {
-      fu = isMenzen && !isTsumo ? 50 : 40;
+    let fu = 30;
+    if (isMenzen) {
+      if (allShuntsu && isRyanmen) fu = isTsumo ? 20 : 30;
+      else fu = isTsumo ? 30 : 40;
+    } else {
+      fu = 30;
+      if (kanCount >= 1) fu = 40;
     }
 
     candidateResults.push(buildFinalScore(totalHan, fu, isDealer, isTsumo, yakus));
@@ -366,19 +367,18 @@ function buildFinalScore(han, fu, isDealer, isTsumo, yakus, isYakuman = false) {
   return { han, fu, basePoints, points, tsumoPay, label, yakus };
 }
 
-export function checkFuriten(handTileIds, discards, melds = []) {
-  const countsClosed = toCounts34(handTileIds);
+export function checkFuriten(handTileIds, melds = [], discards = []) {
+  const counts = toCounts34(handTileIds);
   const waitKinds = new Set();
-  const targetMentsu = 4 - melds.length;
 
   for (let k = 0; k < 34; k++) {
-    if (countsClosed[k] >= 4) continue;
-    countsClosed[k]++;
+    if (counts[k] >= 4) continue;
+    counts[k]++;
     const isWinShape =
-      decomposeStandard(countsClosed, targetMentsu).length > 0 ||
-      (melds.length === 0 && calcChiitoiShanten(countsClosed) === -1) ||
-      (melds.length === 0 && calcKokushiShanten(countsClosed) === -1);
-    countsClosed[k]--;
+      decomposeHandWithMelds(counts, melds.length).length > 0 ||
+      (melds.length === 0 && calcChiitoiShanten(counts) === -1) ||
+      (melds.length === 0 && calcKokushiShanten(counts) === -1);
+    counts[k]--;
     if (isWinShape) waitKinds.add(k);
   }
 

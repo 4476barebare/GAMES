@@ -95,3 +95,30 @@ export function findTileIdByLabel(tileIds, label, redDoraEnabled = true) {
   const found = tileIds.find((id) => tileIdToKind(id) === targetKind);
   return found !== undefined ? found : null;
 }
+
+export function findMultipleTileIdsByLabels(tileIds, labels, redDoraEnabled = true) {
+  const pool = [...tileIds];
+  const picked = [];
+  for (const lbl of labels) {
+    const id = findTileIdByLabel(pool, lbl, redDoraEnabled);
+    if (id === null) return null;
+    picked.push(id);
+    pool.splice(pool.indexOf(id), 1);
+  }
+  return picked;
+}
+
+export function getTileVisual(tileId, redDoraEnabled = true) {
+  const kindId = tileIdToKind(tileId);
+  const red = isRedDora(tileId, redDoraEnabled);
+  if (kindId <= 8) {
+    return { top: String(kindId + 1), bottom: "萬", cls: red ? "suit-m red-dora" : "suit-m" };
+  }
+  if (kindId <= 17) {
+    return { top: String(kindId - 8), bottom: "筒", cls: red ? "suit-p red-dora" : "suit-p" };
+  }
+  if (kindId <= 26) {
+    return { top: String(kindId - 17), bottom: "索", cls: red ? "suit-s red-dora" : "suit-s" };
+  }
+  return { top: HONOR_NAMES[kindId - 27], bottom: "", cls: "suit-z" };
+}
