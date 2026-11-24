@@ -26,26 +26,23 @@
 
   <!-- メインコンテナ（画面全体は100dvh固定・手牌のみ横スクロール可） -->
   <main class="arena">
-    <section class="table-board" aria-label="4人麻雀卓">
+    <section class="table-board" id="table-board" aria-label="4人麻雀卓">
 
       <!-- 上：対面（Seat 2） -->
       <div class="seat-top">
-        <div class="seat-top-row">
-          <div class="seat-header" id="seat-header-2">
-            <span class="wind-tag" id="wind-2">西</span>
-            <strong class="seat-name" id="name-2">対面</strong>
-            <span class="seat-pts" id="pts-2">25,000</span>
-            <span class="riichi-tag hidden" id="riichi-2">リーチ</span>
-            <span class="think-tag hidden" id="think-2">思考中</span>
-          </div>
-          <div class="melds-row" id="melds-2"></div>
+        <div class="seat-header" id="seat-header-2">
+          <span class="wind-tag" id="wind-2">西</span>
+          <strong class="seat-name" id="name-2">対面</strong>
+          <span class="seat-pts" id="pts-2">25,000</span>
+          <span class="riichi-tag hidden" id="riichi-2">リーチ</span>
+          <span class="think-tag hidden" id="think-2">思考中</span>
         </div>
         <div class="hand-row hand-opp" id="hand-2"></div>
       </div>
 
-      <!-- 中段：左(上家 Seat 3・90度回転) + 中央(4家の河＆HUD) + 右(下家 Seat 1・270度回転) -->
+      <!-- 中段：左(上家 Seat 3・90度回転) + 中央(4家の河＆各家の副露＆HUD) + 右(下家 Seat 1・270度回転) -->
       <div class="table-middle">
-        <!-- 左：上家（Seat 3） -->
+        <!-- 左：上家（Seat 3）ラベルのみ -->
         <div class="seat-side seat-left">
           <div class="rot-label rot-90" id="seat-header-3">
             <span class="wind-tag" id="wind-3">北</span>
@@ -54,22 +51,29 @@
             <span class="riichi-tag hidden" id="riichi-3">リーチ</span>
             <span class="think-tag hidden" id="think-3">…</span>
           </div>
-          <div class="melds-side" id="melds-3"></div>
         </div>
 
-        <!-- 中央：4家の河とセンターHUD -->
+        <!-- 中央：4家の河と各家の副露（河の横に整列）＋ センターHUD -->
         <div class="center-square">
-          <!-- 対面の河（上） -->
-          <div class="river-area river-top">
-            <div class="river-grid" id="river-2"></div>
+          <!-- 対面の河（上）＋ 左側に270度回転で対面の副露（対面視点の右手側） -->
+          <div class="top-river-row">
+            <div class="melds-top-side" id="melds-2"></div>
+            <div class="river-area river-top">
+              <div class="river-grid" id="river-2"></div>
+            </div>
           </div>
 
-          <!-- 中央行：上家の河（左）＋ HUD ＋ 下家の河（右） -->
+          <!-- 中央行：上家の河＋副露（左） ／ HUD ／ 下家の副露＋河（右） -->
           <div class="center-row">
-            <div class="river-area river-side">
-              <div class="river-grid river-side-grid" id="river-3"></div>
+            <!-- 左：上家（Seat 3）河の下側に副露 -->
+            <div class="side-river-col side-river-left">
+              <div class="river-area river-side">
+                <div class="river-grid river-side-grid" id="river-3"></div>
+              </div>
+              <div class="melds-side-horiz" id="melds-3"></div>
             </div>
 
+            <!-- センター卓情報 -->
             <div class="center-hud">
               <div class="hud-round" id="round-label">東1局 0本場</div>
               <div class="hud-meta">
@@ -83,12 +87,16 @@
               <div class="hud-turn" id="turn-banner">東家の番</div>
             </div>
 
-            <div class="river-area river-side">
-              <div class="river-grid river-side-grid" id="river-1"></div>
+            <!-- 右：下家（Seat 1）河の上側に副露 -->
+            <div class="side-river-col side-river-right">
+              <div class="melds-side-horiz" id="melds-1"></div>
+              <div class="river-area river-side">
+                <div class="river-grid river-side-grid" id="river-1"></div>
+              </div>
             </div>
           </div>
 
-          <!-- 自分の河（下）＋ 右側に自分の鳴き牌（副露）エリア -->
+          <!-- 自分の河（下）＋ 右側に自分の副露（自視点の右手側） -->
           <div class="bottom-river-row">
             <div class="river-area river-bottom">
               <div class="river-grid" id="river-0"></div>
@@ -97,7 +105,7 @@
           </div>
         </div>
 
-        <!-- 右：下家（Seat 1） -->
+        <!-- 右：下家（Seat 1）ラベルのみ -->
         <div class="seat-side seat-right">
           <div class="rot-label rot-270" id="seat-header-1">
             <span class="wind-tag" id="wind-1">南</span>
@@ -106,13 +114,12 @@
             <span class="riichi-tag hidden" id="riichi-1">リーチ</span>
             <span class="think-tag hidden" id="think-1">…</span>
           </div>
-          <div class="melds-side" id="melds-1"></div>
         </div>
       </div>
 
       <!-- 下：自分（Seat 0） -->
       <div class="seat-bottom">
-        <!-- アクションバー（鳴き判定中は自席ステータスを隠して全選択肢を表示） -->
+        <!-- アクションバー -->
         <div class="action-bar" id="action-bar">
           <div class="seat-header compact-self" id="seat-header-0">
             <span class="wind-tag" id="wind-0">東</span>
@@ -124,7 +131,7 @@
           <div class="action-buttons" id="action-buttons"></div>
         </div>
 
-        <!-- 自分の手牌（横スクロール可能・鳴き牌は河の横へ移動済みなので100%幅使用） -->
+        <!-- 自分の手牌 -->
         <div class="self-tiles-container">
           <div class="hand-scroll-wrap" id="hand-scroll-wrap">
             <div class="hand-row hand-self" id="hand-0"></div>
@@ -149,7 +156,7 @@
     </aside>
   </main>
 
-  <!-- 設定モーダル（座席ごとの個別モデル・APIキー・性格設定） -->
+  <!-- 設定モーダル -->
   <dialog id="settings-modal" class="modal">
     <form method="dialog" class="modal-card modal-wide" id="settings-form">
       <h2>4人麻雀 卓設定 / 座席別 APIキー（BYOK）</h2>
