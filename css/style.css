@@ -14,15 +14,17 @@
   --danger: #ef4444;
   --warn: #f59e0b;
   --gold: #facc15;
+  --tile-bg: #fefce8;
+  --tile-border: #cbd5e1;
 
-  --self-tile-w: clamp(34px, 6.4vw, 46px);
-  --self-tile-h: clamp(48px, 9.0vw, 64px);
-  --river-tile-w: clamp(20px, 2.5vw, 28px);
-  --river-tile-h: clamp(28px, 3.5vw, 39px);
-  --opp-tile-w: clamp(16px, 2.0vw, 24px);
-  --opp-tile-h: clamp(23px, 2.8vw, 33px);
-  --meld-tile-w: clamp(17px, 2.1vw, 23px);
-  --meld-tile-h: clamp(24px, 3.0vw, 32px);
+  --self-tile-w: 34px;
+  --self-tile-h: 48px;
+  --river-tile-w: clamp(17px, 4.1vw, 25px);
+  --river-tile-h: clamp(23px, 5.4vw, 34px);
+  --opp-tile-w: clamp(14px, 3.4vw, 21px);
+  --opp-tile-h: clamp(20px, 4.6vw, 29px);
+  --meld-tile-w: clamp(14px, 3.2vw, 20px);
+  --meld-tile-h: clamp(19px, 4.3vw, 27px);
 }
 
 html, body {
@@ -38,39 +40,37 @@ html, body {
   flex-direction: column;
 }
 
-/* ヘッダー横スクロール対応 */
+/* トップバー（横スクロール対応） */
 .topbar {
   flex: 0 0 auto;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 12px;
+  width: 100%;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
-  gap: 8px;
-  min-height: 44px;
+  min-height: 40px;
   overflow-x: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
 }
 
-.topbar::-webkit-scrollbar {
-  height: 3px;
-}
-
-.topbar::-webkit-scrollbar-thumb {
-  background: #475569;
-  border-radius: 3px;
+.topbar-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 8px;
+  gap: 8px;
+  min-width: max-content;
+  width: 100%;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .brand h1 {
-  font-size: 0.96rem;
+  font-size: 0.9rem;
   margin: 0;
   white-space: nowrap;
 }
@@ -79,36 +79,28 @@ html, body {
   background: var(--accent);
   color: #0f172a;
   font-weight: 800;
-  font-size: 0.7rem;
-  padding: 2px 7px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.save-indicator {
-  font-size: 0.7rem;
-  color: #86efac;
-  background: rgba(20, 83, 45, 0.6);
+  font-size: 0.68rem;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 999px;
   white-space: nowrap;
 }
 
 .topbar-actions {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   align-items: center;
-  flex: 0 0 auto;
+  flex-shrink: 0;
 }
 
 .btn {
   border: none;
-  border-radius: 6px;
-  padding: 5px 10px;
-  font-size: 0.76rem;
+  border-radius: 5px;
+  padding: 4px 9px;
+  font-size: 0.74rem;
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+  flex-shrink: 0;
   transition: opacity 0.12s, transform 0.05s;
 }
 
@@ -119,16 +111,17 @@ html, body {
 .btn-secondary { background: #334155; color: var(--text); }
 .btn-danger { background: var(--danger); color: #fff; }
 .btn-warn { background: var(--warn); color: #0f172a; }
-.btn-call { background: #eab308; color: #0f172a; border: 1px solid #fef08a; }
+.btn-call { background: #10b981; color: #052e16; }
 
 .mobile-only { display: none; }
 
+/* メインアリーナ */
 .arena {
   flex: 1 1 0;
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr 290px;
-  gap: 8px;
+  gap: 6px;
   padding: 6px;
   overflow: hidden;
 }
@@ -137,48 +130,50 @@ html, body {
   background: radial-gradient(circle at center, var(--felt), var(--felt-dark));
   border: 2px solid #166534;
   border-radius: 10px;
-  padding: 6px 8px;
+  padding: 5px 6px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  gap: 4px;
-  touch-action: pan-y;
+  gap: 3px;
+  touch-action: pan-y; /* 卓全体の横スワイプをJSで捕捉して手牌をスクロール */
 }
 
+/* 座席共通バッジ */
 .seat-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.76rem;
-  background: rgba(15, 23, 42, 0.68);
-  padding: 3px 8px;
-  border-radius: 6px;
-  border: 1px solid transparent;
+  gap: 5px;
+  font-size: 0.74rem;
+  background: rgba(15, 23, 42, 0.74);
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1.5px solid transparent;
   width: fit-content;
+  flex-shrink: 0;
 }
 
-.seat-header.active-turn {
+.seat-header.active-turn, .rot-label.active-turn {
   border-color: var(--gold);
-  box-shadow: 0 0 8px rgba(250, 204, 21, 0.45);
+  box-shadow: 0 0 8px rgba(250, 204, 21, 0.5);
 }
 
 .wind-tag {
   background: var(--gold);
   color: #0f172a;
   font-weight: 800;
-  padding: 1px 5px;
+  padding: 0 4px;
   border-radius: 3px;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
 }
 
 .seat-name {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 110px;
+  max-width: 96px;
 }
 
 .seat-pts {
@@ -190,15 +185,15 @@ html, body {
 .riichi-tag {
   background: var(--danger);
   color: #fff;
-  font-size: 0.65rem;
+  font-size: 0.64rem;
   font-weight: 700;
-  padding: 1px 5px;
+  padding: 0 4px;
   border-radius: 3px;
 }
 
 .think-tag {
   color: #7dd3fc;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   animation: pulse 1s infinite;
 }
 
@@ -207,55 +202,54 @@ html, body {
   50% { opacity: 0.4; }
 }
 
+/* 上：対面（Seat 2） */
 .seat-top {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
 }
 
+/* 中段：左(上家 90度回転) + 中央(4家の河＆各家の副露＆HUD) + 右(下家 270度回転) */
 .table-middle {
   flex: 1 1 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: 78px 1fr 78px;
-  gap: 4px;
+  grid-template-columns: 30px 1fr 30px;
+  gap: 2px;
   align-items: center;
   overflow: hidden;
 }
 
 .seat-side {
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  min-height: 0;
-  overflow: hidden;
+  position: relative;
+  overflow: visible;
 }
 
-.vertical-header {
-  flex-direction: column;
+.rot-label {
+  display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 4px;
-  width: 100%;
-  text-align: center;
+  gap: 4px;
   font-size: 0.7rem;
+  background: rgba(15, 23, 42, 0.78);
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1.5px solid transparent;
+  white-space: nowrap;
+  transform-origin: center center;
 }
 
-.vertical-header .seat-name {
-  max-width: 72px;
-}
+.rot-90 { transform: rotate(90deg); }
+.rot-270 { transform: rotate(270deg); }
+.rot-label .seat-name { max-width: 86px; }
 
-.hand-side {
-  display: grid;
-  grid-template-columns: repeat(2, auto);
-  gap: 2px;
-  justify-content: center;
-}
-
+/* 中央：4家の河＋各家の副露＋センターHUD */
 .center-square {
   height: 100%;
   min-height: 0;
@@ -263,7 +257,7 @@ html, body {
   flex-direction: column;
   justify-content: space-between;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   overflow: hidden;
 }
 
@@ -278,7 +272,7 @@ html, body {
 }
 
 .center-hud {
-  background: rgba(15, 23, 42, 0.88);
+  background: rgba(15, 23, 42, 0.9);
   border: 1px solid #475569;
   border-radius: 8px;
   padding: 5px 8px;
@@ -286,75 +280,56 @@ html, body {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  min-width: 118px;
-  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.4);
+  min-width: 90px;
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.45);
 }
 
 .hud-round {
   font-weight: 800;
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   color: var(--gold);
+  white-space: nowrap;
 }
 
 .hud-meta {
   display: flex;
-  gap: 8px;
-  font-size: 0.7rem;
+  gap: 6px;
+  font-size: 0.65rem;
   color: #cbd5e1;
+  white-space: nowrap;
 }
 
 .hud-dora {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .dora-label {
-  font-size: 0.64rem;
+  font-size: 0.62rem;
   color: var(--muted);
 }
 
 .hud-turn {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   color: var(--accent);
+  white-space: nowrap;
+  max-width: 94px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* 河と鳴き牌のレイアウト（自河・他家河の横に副露を表示） */
-.river-meld-wrap {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  max-width: 100%;
-}
-
-.river-wrap-bottom,
-.river-wrap-top {
-  flex-direction: row;
-  justify-content: center;
-}
-
-.river-wrap-left {
-  flex-direction: column;
-  align-items: flex-end;
-  justify-self: end;
-}
-
-.river-wrap-right {
-  flex-direction: column;
-  align-items: flex-start;
-  justify-self: start;
-}
-
+/* 河エリア */
 .river-area {
   background: rgba(0, 0, 0, 0.24);
-  border-radius: 6px;
+  border-radius: 5px;
   padding: 3px;
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
   overflow: hidden;
-  flex: 0 0 auto;
+  flex-shrink: 0;
 }
 
 .river-top, .river-bottom {
@@ -362,71 +337,105 @@ html, body {
   height: calc(var(--river-tile-h) * 3 + 10px);
 }
 
-.river-left, .river-right {
-  width: calc(var(--river-tile-w) * 6 + 16px);
-  height: calc(var(--river-tile-h) * 3 + 10px);
-  max-width: 100%;
-}
-
-.river-grid {
+.river-top .river-grid, .river-bottom .river-grid {
   display: grid;
   grid-template-columns: repeat(6, var(--river-tile-w));
   grid-auto-rows: var(--river-tile-h);
   gap: 2px;
 }
 
-.meld-area {
+.river-side {
+  width: calc(var(--river-tile-w) * 3 + 10px);
+  height: calc(var(--river-tile-h) * 6 + 16px);
+  max-height: 100%;
+}
+
+.river-side .river-grid {
+  display: grid;
+  grid-template-columns: repeat(3, var(--river-tile-w));
+  grid-auto-rows: var(--river-tile-h);
+  gap: 2px;
+}
+
+/* --- 4家すべての河の横に揃えた鳴き牌（副露）レイアウト --- */
+
+/* 対面（上）：左側に270度回転で対面の副露（対面視点の右手側）、右側に河 */
+.top-river-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+}
+
+.melds-top-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  max-height: calc(var(--river-tile-h) * 3 + 10px);
+  overflow: hidden;
+}
+
+/* 自分（下）：左側に河、右側に自分の副露（自視点の右手側） */
+.bottom-river-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+}
+
+.melds-self-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  justify-content: flex-end;
+  max-height: calc(var(--river-tile-h) * 3 + 10px);
+  overflow: hidden;
+}
+
+/* 左右（上家・下家）：河のすぐ上下に副露をコンパクトに並べる */
+.side-river-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 100%;
+}
+
+.side-river-left {
+  justify-self: end;
+  align-items: flex-end;
+}
+
+.side-river-right {
+  justify-self: start;
+  align-items: flex-start;
+}
+
+.melds-side-horiz {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  align-items: flex-end;
-  max-width: 190px;
+  gap: 2px;
+  max-width: calc(var(--river-tile-w) * 3 + 18px);
 }
 
 .meld-group {
-  display: inline-flex;
+  display: flex;
   align-items: flex-end;
   gap: 1px;
-  background: rgba(15, 23, 42, 0.45);
-  padding: 2px;
-  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.34);
+  padding: 1.5px;
+  border-radius: 3px;
 }
 
+/* 下：自分（Seat 0） */
 .seat-bottom {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.speech-ticker {
-  height: 26px;
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  border-radius: 6px;
-  padding: 0 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.76rem;
-  overflow: hidden;
-}
-
-.ticker-speaker {
-  background: #0284c7;
-  color: #fff;
-  font-weight: 700;
-  font-size: 0.68rem;
-  padding: 1px 6px;
-  border-radius: 4px;
-  white-space: nowrap;
-}
-
-.ticker-text {
-  color: #e0f2fe;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  gap: 3px;
 }
 
 .action-bar {
@@ -434,79 +443,99 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  background: rgba(15, 23, 42, 0.75);
-  padding: 4px 8px;
+  background: rgba(15, 23, 42, 0.8);
+  padding: 3px 6px;
   border-radius: 6px;
-  min-height: 34px;
-  flex-wrap: wrap;
+  min-height: 32px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.action-bar.claim-mode {
+  justify-content: center;
 }
 
 .shanten-info {
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 700;
   color: #fde047;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .action-buttons {
   display: flex;
   gap: 5px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
-/* 手牌横スクロール領域 */
-.hand-scroll-viewport {
+/* 自分の手牌（横スクロール可能・卓全体スワイプとも連動） */
+.self-tiles-container {
+  display: flex;
+  align-items: flex-end;
   width: 100%;
+  min-width: 0;
+}
+
+.hand-scroll-wrap {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 2px;
+  padding: 6px 4px 3px;
+  border-radius: 7px;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.hand-scroll-viewport::-webkit-scrollbar {
+.hand-scroll-wrap.through-target {
+  border-color: var(--gold);
+  background: rgba(250, 204, 21, 0.12);
+  box-shadow: 0 0 10px rgba(250, 204, 21, 0.45);
+  cursor: pointer;
+}
+
+.hand-scroll-wrap::-webkit-scrollbar {
   height: 4px;
 }
 
-.hand-scroll-viewport::-webkit-scrollbar-thumb {
-  background: rgba(250, 204, 21, 0.45);
-  border-radius: 4px;
+.hand-scroll-wrap::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+  border-radius: 2px;
 }
 
 .hand-row {
   display: flex;
   align-items: flex-end;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 2px;
   flex-wrap: nowrap;
-}
-
-.hand-self {
-  min-width: max-content;
+  width: max-content;
   margin: 0 auto;
-  height: calc(var(--self-tile-h) + 12px);
-  padding: 8px 6px 2px;
 }
 
 .hand-opp {
   height: var(--opp-tile-h);
 }
 
-/* SVG牌コンテナ */
+/* 牌スタイル（SVG牌表示対応） */
 .tile {
   width: var(--self-tile-w);
   height: var(--self-tile-h);
   background: transparent;
   border: none;
+  border-radius: 4px;
   padding: 0;
-  border-radius: 5px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
   user-select: none;
   flex: 0 0 auto;
-  position: relative;
-  transition: transform 0.1s ease, box-shadow 0.12s ease;
+  transition: transform 0.1s, box-shadow 0.1s, filter 0.1s;
 }
 
 .tile-svg {
@@ -531,67 +560,60 @@ html, body {
   height: var(--meld-tile-h);
 }
 
-/* 横倒し表示（リーチ宣言牌・鳴き牌の横向き） */
-.tile.tile-sideways {
-  width: var(--meld-tile-h);
-  height: var(--meld-tile-w);
+.tile.called-highlight {
+  outline: 1.5px solid #eab308;
+  outline-offset: -1px;
+  border-radius: 3px;
 }
 
-.tile.tile-sideways .tile-svg {
-  width: var(--meld-tile-w);
-  height: var(--meld-tile-h);
-  transform: rotate(-90deg);
+.tile.called-highlight .tile-svg {
+  filter: sepia(0.32) saturate(1.45) brightness(1.02);
 }
 
-.tile.river-tile.tile-sideways {
-  width: var(--river-tile-h);
-  height: var(--river-tile-w);
-}
-
-.tile.river-tile.tile-sideways .tile-svg {
-  width: var(--river-tile-w);
-  height: var(--river-tile-h);
-  transform: rotate(-90deg);
+.tile.back {
+  background: transparent;
+  border: none;
 }
 
 .tile.drawn {
   margin-left: 8px;
 }
 
+.tile.highlight-yellow {
+  box-shadow: 0 0 0 2px var(--gold), 0 0 8px rgba(250, 204, 21, 0.85);
+}
+
+.tile.selected-tile {
+  transform: translateY(-7px);
+  box-shadow: 0 0 0 2px var(--gold), 0 4px 10px rgba(250, 204, 21, 0.9);
+}
+
 .tile.clickable {
   cursor: pointer;
 }
 
-.tile.clickable:hover {
-  transform: translateY(-4px);
-}
-
-/* 黄色ハイライト枠（ツモ牌・最新打牌・選択中牌・スルー待機手牌） */
-.tile.yellow-highlight {
-  outline: 2.5px solid #facc15;
-  outline-offset: 0px;
-  box-shadow: 0 0 10px rgba(250, 204, 21, 0.85);
-  z-index: 2;
-}
-
-.tile.selected-tile {
-  transform: translateY(-8px);
-}
-
-.tile.riichi-tile .tile-svg {
-  filter: drop-shadow(0 0 3px #ef4444);
+.tile.riichi-tile {
+  outline: 2px solid var(--danger);
+  outline-offset: -1px;
+  border-radius: 3px;
 }
 
 .tile.tsumogiri .tile-svg {
-  filter: brightness(0.87);
+  filter: brightness(0.86);
 }
+
+.tile .suit-m { color: #b91c1c; }
+.tile .suit-p { color: #1d4ed8; }
+.tile .suit-s { color: #15803d; }
+.tile .suit-z { color: #1e293b; }
+.tile .red-dora { color: #dc2626; text-decoration: underline; }
 
 .mini-tiles {
   display: flex;
-  gap: 3px;
+  gap: 2px;
 }
 
-/* 右サイドパネル */
+/* サイドパネル */
 .side-panel {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -615,7 +637,7 @@ html, body {
   color: var(--muted);
   border: none;
   padding: 8px;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -689,16 +711,53 @@ html, body {
   line-height: 1.35;
 }
 
+/* 座席別設定カード */
+.seat-config-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 46dvh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.seat-cfg-card {
+  background: #0f172a;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.seat-cfg-title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--gold);
+}
+
+.seat-cfg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.3fr;
+  gap: 6px;
+}
+
+@media (max-width: 600px) {
+  .seat-cfg-grid { grid-template-columns: 1fr; }
+}
+
+/* 精算テーブル */
 .settlement-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: 0.84rem;
   margin-top: 8px;
 }
 
 .settlement-table th, .settlement-table td {
   border-bottom: 1px solid var(--border);
-  padding: 6px 8px;
+  padding: 6px;
   text-align: right;
 }
 
@@ -712,76 +771,53 @@ html, body {
 
 .hidden { display: none !important; }
 
+/* モーダル */
 .modal {
   border: none;
   border-radius: 12px;
   padding: 0;
   background: var(--panel);
   color: var(--text);
-  max-width: 560px;
-  width: 94%;
+  max-width: 620px;
+  width: 95%;
   max-height: 90dvh;
 }
 
 .modal::backdrop { background: rgba(0, 0, 0, 0.72); }
 
 .modal-card {
-  padding: 16px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  overflow-y: auto;
-  max-height: 88dvh;
 }
 
 .modal-wide { max-width: 680px; }
-.modal-card h2 { margin: 0; font-size: 1.02rem; }
+.modal-card h2 { margin: 0; font-size: 1rem; }
 .hint { margin: 0; font-size: 0.76rem; color: var(--muted); line-height: 1.4; }
-
-.seat-config-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.seat-config-card {
-  background: #0f172a;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  font-size: 0.78rem;
-}
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 0.8rem;
+  gap: 3px;
+  font-size: 0.78rem;
 }
 
-.field input, .field select, .seat-config-card input, .seat-config-card select, textarea {
-  background: #1e293b;
+.field input, .field select, textarea {
+  background: #0f172a;
   border: 1px solid var(--border);
   border-radius: 5px;
-  padding: 6px 7px;
+  padding: 6px 8px;
   color: var(--text);
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   font-family: inherit;
+  width: 100%;
 }
 
 .field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-}
-
-.field-grid-3 {
-  display: grid;
-  grid-template-columns: 1.2fr 1.2fr 1fr;
-  gap: 6px;
 }
 
 .modal-footer {
@@ -792,17 +828,17 @@ html, body {
 
 .result-body {
   background: #0f172a;
-  padding: 12px;
+  padding: 10px;
   border-radius: 8px;
-  line-height: 1.55;
+  line-height: 1.5;
   font-size: 0.86rem;
   max-height: 55dvh;
   overflow-y: auto;
 }
 
+/* モバイル・狭幅画面対応 */
 @media (max-width: 900px) {
   .mobile-only { display: inline-block; }
-  .save-indicator { display: none; }
 
   .arena {
     grid-template-columns: 1fr;
@@ -811,37 +847,21 @@ html, body {
 
   .side-panel {
     position: fixed;
-    top: 44px;
+    top: 40px;
     right: 0;
     bottom: 0;
     width: min(320px, 88vw);
     z-index: 50;
     transform: translateX(105%);
     transition: transform 0.2s ease;
-    box-shadow: -6px 0 20px rgba(0, 0, 0, 0.6);
+    box-shadow: -6px 0 20px rgba(0, 0, 0, 0.65);
   }
 
   .side-panel.open {
     transform: translateX(0);
   }
 
-  .table-middle {
-    grid-template-columns: 58px 1fr 58px;
-  }
-
-  .hand-side {
-    display: none;
-  }
-
-  .river-left, .river-right {
-    width: calc(var(--river-tile-w) * 4 + 12px);
-  }
-
-  .river-left .river-grid, .river-right .river-grid {
-    grid-template-columns: repeat(4, var(--river-tile-w));
-  }
-
-  .field-grid, .field-grid-3 {
+  .field-grid {
     grid-template-columns: 1fr;
   }
 }
