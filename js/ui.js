@@ -1,6 +1,6 @@
 /**
  * ui.js
- * 4人麻雀 1画面固定UI描画・河・手牌・思考カード・半荘精算モーダル
+ * 4人麻雀 1画面固定UI描画（手牌のみ横スクロール・90/270度回転ラベル・副露牌表示・鳴きボタン）
  */
 
 import { getTileVisual, tileIdToLabel } from "./tiles.js";
@@ -14,10 +14,12 @@ function createTileElement(tileId, options = {}) {
   div.className = "tile";
   if (options.variant === "river") div.classList.add("river-tile");
   if (options.variant === "opp") div.classList.add("opp-tile");
+  if (options.variant === "meld") div.classList.add("meld-tile");
   if (options.drawn) div.classList.add("drawn");
   if (options.clickable) div.classList.add("clickable");
   if (options.riichi) div.classList.add("riichi-tile");
   if (options.tsumogiri) div.classList.add("tsumogiri");
+  if (options.calledHighlight) div.classList.add("called-highlight");
 
   if (options.faceDown) {
     div.classList.add("back");
@@ -33,7 +35,7 @@ function createTileElement(tileId, options = {}) {
   if (vis.bottom) {
     const bot = document.createElement("span");
     bot.className = vis.cls;
-    bot.style.fontSize = options.variant === "self" ? "0.68rem" : "0.55rem";
+    bot.style.fontSize = options.variant === "self" ? "0.66rem" : "0.52rem";
     bot.textContent = vis.bottom;
     div.appendChild(bot);
   }
@@ -43,6 +45,28 @@ function createTileElement(tileId, options = {}) {
   }
 
   return div;
+}
+
+function renderMelds(containerEl, melds, redDora) {
+  containerEl.innerHTML = "";
+  for (const m of melds) {
+    const group = document.createElement("div");
+    group.className = "meld-group";
+    m.tiles.forEach((tid, idx) => {
+      // 暗槓は両端を裏向き表示
+      const faceDown = m.type === "ankan" && (idx === 0 || idx === 3);
+      const calledHighlight = m.calledTile === tid;
+      group.appendChild(
+        createTileElement(tid, {
+          variant: "meld",
+          faceDown,
+          calledHighlight,
+          redDora
+        })
+      );
+    });
+    containerEl.appendChild(group);
+  }
 }
 
 export function renderGame(state, uiOptions, handlers) {
@@ -70,12 +94,12 @@ export function renderGame(state, uiOptions, handlers) {
   } else if (state.status === "round_end") {
     banner.textContent = "終局";
   } else if (state.turn.phase === "claim_check") {
-    banner.textContent = "ロン判定中！";
+    banner.textContent = "鳴き/ロン判定";
   } else {
-    banner.textContent = `${WIND_JP[activePlayer.wind]}家 (${activePlayer.name})`;
+    banner.textContent = `${WIND_JP[activePlayer.wind]}:${activePlayer.name}`;
   }
 
-  // 全4席の情報・河・手牌を描画
+  // 全4席の情報・河・副露・手牌を描画
   for (let seat = 0; seat < 4; seat++) {
     const p = state.players[seat];
     document.getElementById(`wind-${seat}`).textContent = WIND_JP[p.wind];
@@ -92,10 +116,11 @@ export function renderGame(state, uiOptions, handlers) {
       thinkEl.classList.toggle("hidden", uiOptions.thinkingSeat !== seat);
     }
 
-    // 河
+    // 河（鳴かれた牌は河から抜いて表示）
     const riverEl = document.getElementById(`river-${seat}`);
     riverEl.innerHTML = "";
     for (const d of p.discards) {
+      if (d.calledBy !== null) continue;
       riverEl.appendChild(
         createTileElement(d.tileId, {
           variant: "river",
@@ -106,8 +131,15 @@ export function renderGame(state, uiOptions, handlers) {
       );
     }
 
-    // 手牌
+    // 副露（鳴き牌）表示
+    const meldsEl = document.getElementById(`melds-${seat}`);
+    if (meldsEl) {
+      renderMelds(meldsEl, p.melds, red);
+    }
+
+    // 手牌（Seat 0＝自分、Seat 2＝対面）
     const handEl = document.getElementById(`hand-${seat}`);
+    if (!handEl) continue;
     handEl.innerHTML = "";
 
     if (seat === 0) {
@@ -139,7 +171,7 @@ export function renderGame(state, uiOptions, handlers) {
           })
         );
       }
-    } else {
+    } else if (seat === 2) {
       for (const tid of p.hand) {
         handEl.appendChild(
           createTileElement(tid, {
@@ -153,7 +185,7 @@ export function renderGame(state, uiOptions, handlers) {
         handEl.appendChild(
           createTileElement(p.drawnTile, {
             variant: "opp",
-            drawn: seat === 2,
+            drawn: true,
             faceDown: !showAllHands,
             redDora: red
           })
@@ -162,18 +194,28 @@ export function renderGame(state, uiOptions, handlers) {
     }
   }
 
-  // 自分（Seat 0）のシャンテン＆アクションボタン
+  // 自分（Seat 0）のシャンテン＆アクションボタン（ツモ・ロン・リーチ・チー・ポン・カン・パス）
   const self = state.players[0];
   const visible = [];
-  state.players.forEach((pl) => pl.discards.forEach((d) => visible.push(d.tileId)));
+  state.players.forEach((pl) => {
+    pl.discards.forEach((d) => visible.push(d.tileId));
+    pl.melds.forEach((m) => m.tiles.forEach((t) => visible.push(t)));
+  });
   state.wall.doraIndicators.forEach((d) => visible.push(d));
-  const cands = analyzeDiscardCandidates(self.hand, self.drawnTile, visible, red);
+
+  const cands = analyzeDiscardCandidates(
+    self.hand,
+    self.drawnTile,
+    visible,
+    red,
+    self.melds.length
+  );
   const bestS = cands.length > 0 ? cands[0].shantenAfter : "-";
   const shantenEl = document.getElementById("shanten-info");
   if (bestS === 0) {
-    shantenEl.textContent = `テンパイ！待:${cands[0].waits.map((w) => w.label).join(",")}`;
+    shantenEl.textContent = `聴牌 待:${cands[0].waits.map((w) => w.label).join(",")}`;
   } else {
-    shantenEl.textContent = `${bestS}シャンテン`;
+    shantenEl.textContent = `${bestS}向聴`;
   }
 
   const btnBox = document.getElementById("action-buttons");
@@ -181,44 +223,54 @@ export function renderGame(state, uiOptions, handlers) {
   if (state.status === "playing" && self.control === "human") {
     const legal = getLegalActions(state, 0);
 
-    const tsumoAct = legal.find((a) => a.action === "tsumo");
-    if (tsumoAct) {
+    // ツモ・ロン
+    for (const act of legal.filter((a) => a.action === "tsumo" || a.action === "ron")) {
       const b = document.createElement("button");
       b.className = "btn btn-danger";
-      b.textContent = `ツモ (${tsumoAct.winInfo.points}点)`;
-      b.onclick = () => handlers.onHumanAction(tsumoAct);
+      b.textContent = `${act.action === "tsumo" ? "ツモ" : "ロン"}(${act.winInfo.points})`;
+      b.onclick = () => handlers.onHumanAction(act);
       btnBox.appendChild(b);
     }
 
-    const ronAct = legal.find((a) => a.action === "ron");
-    if (ronAct) {
-      const b = document.createElement("button");
-      b.className = "btn btn-danger";
-      b.textContent = `ロン (${ronAct.winInfo.points}点)`;
-      b.onclick = () => handlers.onHumanAction(ronAct);
-      btnBox.appendChild(b);
-    }
-
-    const riichiActs = legal.filter((a) => a.action === "riichi");
-    for (const rAct of riichiActs) {
+    // リーチ
+    for (const rAct of legal.filter((a) => a.action === "riichi")) {
       const b = document.createElement("button");
       b.className = "btn btn-warn";
-      b.textContent = `リーチ(${rAct.tile})`;
+      b.textContent = `立直(${rAct.tile})`;
       b.onclick = () => handlers.onHumanAction(rAct);
       btnBox.appendChild(b);
     }
 
+    // ポン・大明槓・暗槓・加槓
+    for (const cAct of legal.filter((a) => ["pon", "daiminkan", "ankan", "kakan"].includes(a.action))) {
+      const labelMap = { pon: "ポン", daiminkan: "カン", ankan: "暗槓", kakan: "加槓" };
+      const b = document.createElement("button");
+      b.className = "btn btn-call";
+      b.textContent = `${labelMap[cAct.action]}(${cAct.tile})`;
+      b.onclick = () => handlers.onHumanAction(cAct);
+      btnBox.appendChild(b);
+    }
+
+    // チー（複数パターン対応）
+    for (const chiAct of legal.filter((a) => a.action === "chi")) {
+      const b = document.createElement("button");
+      b.className = "btn btn-call";
+      b.textContent = `チー[${chiAct.consume.join("")}]`;
+      b.onclick = () => handlers.onHumanAction(chiAct);
+      btnBox.appendChild(b);
+    }
+
+    // 見送り（パス）
     const passAct = legal.find((a) => a.action === "pass");
     if (passAct) {
       const b = document.createElement("button");
       b.className = "btn btn-secondary";
-      b.textContent = "見送り";
+      b.textContent = "スルー";
       b.onclick = () => handlers.onHumanAction(passAct);
       btnBox.appendChild(b);
     }
   }
 
-  // AI思考パネル更新
   renderThoughtCards(state);
 }
 
@@ -231,7 +283,7 @@ function renderThoughtCards(state) {
     card.className = "thought-card";
     card.innerHTML = `
       <div class="thought-card-head">
-        <span>[${WIND_JP[p.wind]}] ${p.name}</span>
+        <span>[${WIND_JP[p.wind]}] ${escapeHtml(p.name)}</span>
         <span>${p.points.toLocaleString()}点</span>
       </div>
       <div class="thought-card-talk">${p.lastTalk ? `「${escapeHtml(p.lastTalk)}」` : "（待機中）"}</div>
@@ -239,11 +291,6 @@ function renderThoughtCards(state) {
     `;
     container.appendChild(card);
   }
-}
-
-export function updateTicker(speaker, text) {
-  document.getElementById("ticker-speaker").textContent = speaker;
-  document.getElementById("ticker-text").textContent = text;
 }
 
 export function renderLogs(logs) {
@@ -267,7 +314,8 @@ export function showRoundResultModal(state) {
   const roundStr = `${WIND_JP[state.round.wind]}${state.round.number}局 ${state.round.honba}本場`;
 
   if (res.type === "tsumo" || res.type === "ron") {
-    const winKindLabel = res.type === "tsumo" ? "ツモ和了" : res.winners.length > 1 ? "ダブロン/トリロン" : "ロン和了";
+    const winKindLabel =
+      res.type === "tsumo" ? "ツモ和了" : res.winners.length > 1 ? "ダブロン/トリロン" : "ロン和了";
     title.textContent = `${roundStr} - ${winKindLabel}`;
 
     const winnersHtml = res.winners

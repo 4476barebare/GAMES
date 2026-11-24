@@ -1,6 +1,6 @@
 /**
  * shanten.js
- * シャンテン数計算（通常手・七対子・国士無双）および打牌ごとの受け入れ枚数・待ち牌解析
+ * シャンテン数計算（副露数 meldCount 対応：通常手・七対子・国士無双）および受け入れ解析
  */
 
 import { tileIdToKind, tileIdToLabel, kindToLabel, toCounts34 } from "./tiles.js";
@@ -134,31 +134,37 @@ export function getEffectiveTiles(counts13, visibleCounts, meldCount = 0) {
   };
 }
 
-export function analyzeDiscardCandidates(handTileIds, drawnTileId, visibleTileIds, redDora = true) {
-  const all14 = drawnTileId !== null ? [...handTileIds, drawnTileId] : [...handTileIds];
-  const visibleCounts = toCounts34([...all14, ...visibleTileIds]);
+export function analyzeDiscardCandidates(
+  handTileIds,
+  drawnTileId,
+  visibleTileIds,
+  redDora = true,
+  meldCount = 0
+) {
+  const allTiles = drawnTileId !== null ? [...handTileIds, drawnTileId] : [...handTileIds];
+  const visibleCounts = toCounts34([...allTiles, ...visibleTileIds]);
 
   const seenLabels = new Set();
   const candidates = [];
 
-  for (const tid of all14) {
+  for (const tid of allTiles) {
     const k = tileIdToKind(tid);
     const label = tileIdToLabel(tid, redDora);
     if (seenLabels.has(label)) continue;
     seenLabels.add(label);
 
-    const remain13 = [];
+    const remain = [];
     let removed = false;
-    for (const x of all14) {
+    for (const x of allTiles) {
       if (!removed && x === tid) {
         removed = true;
         continue;
       }
-      remain13.push(x);
+      remain.push(x);
     }
 
-    const counts13 = toCounts34(remain13);
-    const eff = getEffectiveTiles(counts13, visibleCounts, 0);
+    const countsRemain = toCounts34(remain);
+    const eff = getEffectiveTiles(countsRemain, visibleCounts, meldCount);
 
     candidates.push({
       tileId: tid,

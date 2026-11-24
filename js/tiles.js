@@ -6,7 +6,6 @@
 const HONOR_NAMES = ["東", "南", "西", "北", "白", "發", "中"];
 const HONOR_CODES = ["1z", "2z", "3z", "4z", "5z", "6z", "7z"];
 
-// 赤ドラ対象となる136枚固有ID (5m=16, 5p=52, 5s=88)
 export const RED_TILE_IDS = new Set([16, 52, 88]);
 
 export function tileIdToKind(tileId) {
@@ -95,6 +94,21 @@ export function findTileIdByLabel(tileIds, label, redDoraEnabled = true) {
   }
   const found = tileIds.find((id) => tileIdToKind(id) === targetKind);
   return found !== undefined ? found : null;
+}
+
+/**
+ * 複数枚のラベル配列（チーの消費牌など）に対応する固有tileId配列を取得
+ */
+export function findMultipleTileIdsByLabels(tileIds, labels, redDoraEnabled = true) {
+  const pool = [...tileIds];
+  const picked = [];
+  for (const lbl of labels) {
+    const id = findTileIdByLabel(pool, lbl, redDoraEnabled);
+    if (id === null) return null;
+    picked.push(id);
+    pool.splice(pool.indexOf(id), 1);
+  }
+  return picked;
 }
 
 export function getTileVisual(tileId, redDoraEnabled = true) {
