@@ -2,111 +2,156 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Mahjong Arena ver.0</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>AI Mahjong Arena 4P</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+  <!-- ヘッダー（固定高） -->
   <header class="topbar">
     <div class="brand">
-      <span class="badge">ver.0</span>
+      <span class="badge">4P 半荘</span>
       <h1>AI Mahjong Arena</h1>
+      <span class="save-indicator" id="save-indicator">自動保存ON</span>
     </div>
     <div class="topbar-actions">
-      <button id="btn-new-game" class="btn btn-primary">新規対局</button>
-      <button id="btn-show-md" class="btn btn-secondary">盤面MD確認</button>
-      <button id="btn-settings" class="btn btn-secondary">設定 / APIキー</button>
+      <button id="btn-toggle-open" class="btn btn-secondary" title="他家の手牌表示切替">手牌公開: OFF</button>
+      <button id="btn-show-log-mobile" class="btn btn-secondary mobile-only">ログ/思考</button>
+      <button id="btn-show-md" class="btn btn-secondary">盤面MD</button>
+      <button id="btn-settings" class="btn btn-secondary">設定 / API</button>
+      <button id="btn-new-game" class="btn btn-primary">新規半荘</button>
     </div>
   </header>
 
+  <!-- メインコンテナ（1画面固定・スクロール禁止） -->
   <main class="arena">
-    <!-- 卓エリア -->
-    <section class="table-board" aria-label="麻雀卓">
-      <!-- 相手プレイヤー領域（Seat 1） -->
-      <div class="player-zone opponent-zone" id="opponent-zone">
-        <div class="player-header">
-          <div class="player-meta">
-            <span class="wind-tag" id="opp-wind">南</span>
-            <strong id="opp-name">Gemini</strong>
-            <span class="points" id="opp-points">25,000</span>
-            <span class="riichi-badge hidden" id="opp-riichi">リーチ中</span>
-          </div>
-          <div class="ai-status" id="opp-status">待機中</div>
+    <!-- 4人麻雀卓 -->
+    <section class="table-board" aria-label="4人麻雀卓">
+
+      <!-- 上：対面（Seat 2） -->
+      <div class="seat-top">
+        <div class="seat-header" id="seat-header-2">
+          <span class="wind-tag" id="wind-2">西</span>
+          <strong class="seat-name" id="name-2">対面AI</strong>
+          <span class="seat-pts" id="pts-2">25,000</span>
+          <span class="riichi-tag hidden" id="riichi-2">リーチ</span>
+          <span class="think-tag hidden" id="think-2">思考中...</span>
         </div>
-        <div class="ai-bubble" id="opp-bubble">
-          <div class="talk" id="opp-talk">「よろしくお願いします！」</div>
-          <details class="thought-box">
-            <summary>AIの思考ログ（心の声）</summary>
-            <p id="opp-thought">対局開始待ち</p>
-          </details>
-        </div>
-        <div class="hand-row opponent-hand" id="opp-hand"></div>
+        <div class="hand-row hand-opp" id="hand-2"></div>
       </div>
 
-      <!-- 中央情報＆河（捨て牌） -->
-      <div class="center-field">
-        <div class="river opponent-river" id="opp-river"></div>
-
-        <div class="center-hud">
-          <div class="round-info">
-            <span id="round-label">東1局 0本場</span>
-            <span id="wall-count">残り山: --</span>
-            <span id="riichi-sticks">供託: 0</span>
+      <!-- 中段：左(上家 Seat 3) + 中央(4家の河＆卓情報) + 右(下家 Seat 1) -->
+      <div class="table-middle">
+        <!-- 左：上家（Seat 3） -->
+        <div class="seat-side seat-left">
+          <div class="seat-header vertical-header" id="seat-header-3">
+            <span class="wind-tag" id="wind-3">北</span>
+            <strong class="seat-name" id="name-3">上家AI</strong>
+            <span class="seat-pts" id="pts-3">25,000</span>
+            <span class="riichi-tag hidden" id="riichi-3">リーチ</span>
+            <span class="think-tag hidden" id="think-3">思考中</span>
           </div>
-          <div class="dora-box">
-            <span>ドラ表示:</span>
-            <div id="dora-indicators" class="mini-tiles"></div>
-          </div>
-          <div class="turn-banner" id="turn-banner">対局準備中</div>
+          <div class="hand-side" id="hand-3"></div>
         </div>
 
-        <div class="river self-river" id="self-river"></div>
+        <!-- 中央：4家の河とセンターHUD -->
+        <div class="center-square">
+          <!-- 対面の河（上） -->
+          <div class="river-area river-top">
+            <div class="river-grid" id="river-2"></div>
+          </div>
+
+          <div class="center-row">
+            <!-- 上家の河（左） -->
+            <div class="river-area river-left">
+              <div class="river-grid river-side-grid" id="river-3"></div>
+            </div>
+
+            <!-- センター卓情報ボックス -->
+            <div class="center-hud">
+              <div class="hud-round" id="round-label">東1局 0本場</div>
+              <div class="hud-meta">
+                <span id="wall-count">残70</span>
+                <span id="riichi-sticks">供託0</span>
+              </div>
+              <div class="hud-dora">
+                <span class="dora-label">ドラ表示</span>
+                <div class="mini-tiles" id="dora-indicators"></div>
+              </div>
+              <div class="hud-turn" id="turn-banner">東家の番</div>
+            </div>
+
+            <!-- 下家の河（右） -->
+            <div class="river-area river-right">
+              <div class="river-grid river-side-grid" id="river-1"></div>
+            </div>
+          </div>
+
+          <!-- 自分の河（下） -->
+          <div class="river-area river-bottom">
+            <div class="river-grid" id="river-0"></div>
+          </div>
+        </div>
+
+        <!-- 右：下家（Seat 1） -->
+        <div class="seat-side seat-right">
+          <div class="seat-header vertical-header" id="seat-header-1">
+            <span class="wind-tag" id="wind-1">南</span>
+            <strong class="seat-name" id="name-1">下家AI</strong>
+            <span class="seat-pts" id="pts-1">25,000</span>
+            <span class="riichi-tag hidden" id="riichi-1">リーチ</span>
+            <span class="think-tag hidden" id="think-1">思考中</span>
+          </div>
+          <div class="hand-side" id="hand-1"></div>
+        </div>
       </div>
 
-      <!-- 自分プレイヤー領域（Seat 0） -->
-      <div class="player-zone self-zone" id="self-zone">
-        <div class="ai-bubble self-bubble hidden" id="self-bubble">
-          <div class="talk" id="self-talk"></div>
-          <details class="thought-box">
-            <summary>AIの思考ログ</summary>
-            <p id="self-thought"></p>
-          </details>
+      <!-- 下：自分（Seat 0） -->
+      <div class="seat-bottom">
+        <!-- 最新AIセリフティッカー（固定高・レイアウトシフト防止） -->
+        <div class="speech-ticker" id="speech-ticker">
+          <span class="ticker-speaker" id="ticker-speaker">卓情報</span>
+          <span class="ticker-text" id="ticker-text">半荘対局を開始しました。</span>
         </div>
 
-        <div class="action-bar" id="action-bar">
-          <div class="shanten-info" id="shanten-info">シャンテン: -</div>
+        <!-- シャンテン＆アクションボタン -->
+        <div class="action-bar">
+          <div class="seat-header compact-self" id="seat-header-0">
+            <span class="wind-tag" id="wind-0">東</span>
+            <strong class="seat-name" id="name-0">あなた</strong>
+            <span class="seat-pts" id="pts-0">25,000</span>
+            <span class="riichi-tag hidden" id="riichi-0">リーチ</span>
+          </div>
+          <div class="shanten-info" id="shanten-info">計算中...</div>
           <div class="action-buttons" id="action-buttons"></div>
         </div>
 
-        <div class="hand-row self-hand" id="self-hand"></div>
-
-        <div class="player-header">
-          <div class="player-meta">
-            <span class="wind-tag" id="self-wind">東</span>
-            <strong id="self-name">あなた</strong>
-            <span class="points" id="self-points">25,000</span>
-            <span class="riichi-badge hidden" id="self-riichi">リーチ中</span>
-          </div>
-          <label class="toggle-inline">
-            <input type="checkbox" id="chk-open-hand" />
-            相手の手牌を公開（観戦・テスト用）
-          </label>
-        </div>
+        <!-- 自分の手牌 -->
+        <div class="hand-row hand-self" id="hand-0"></div>
       </div>
     </section>
 
-    <!-- サイドログ -->
-    <aside class="side-panel">
-      <h2>対局ログ</h2>
-      <div class="log-list" id="game-log"></div>
+    <!-- 右サイドパネル（デスクトップ固定・内部のみ独立スクロール） -->
+    <aside class="side-panel" id="side-panel">
+      <div class="panel-tabs">
+        <button class="tab-btn active" data-tab="thoughts">AI思考ログ</button>
+        <button class="tab-btn" data-tab="logs">対局ログ</button>
+        <button class="tab-close mobile-only" id="btn-close-panel">×</button>
+      </div>
+      <div class="panel-body" id="panel-thoughts">
+        <div class="thought-cards" id="thought-cards"></div>
+      </div>
+      <div class="panel-body hidden" id="panel-logs">
+        <div class="log-list" id="game-log"></div>
+      </div>
     </aside>
   </main>
 
   <!-- 設定モーダル -->
   <dialog id="settings-modal" class="modal">
     <form method="dialog" class="modal-card" id="settings-form">
-      <h2>対局・APIキー設定（BYOK）</h2>
-      <p class="hint">APIキーはブラウザの localStorage にのみ保存され、外部サーバーには送信されません。未入力でも内蔵簡易AIでテストプレイ可能です。</p>
+      <h2>4人麻雀 設定 / APIキー（BYOK）</h2>
+      <p class="hint">APIキーはブラウザ内 localStorage のみに保存されます。未入力時は内蔵エンジンAIで即プレイ可能です。</p>
 
       <label class="field">
         <span>Gemini API Key</span>
@@ -117,45 +162,45 @@
         <label class="field">
           <span>対戦モード</span>
           <select id="select-match-mode">
-            <option value="human_vs_ai">人間 vs AI（2人打ち）</option>
-            <option value="ai_vs_ai">AI vs AI（オート観戦・テスト用）</option>
+            <option value="human_vs_ai">人間 vs AI 3人（4人半荘）</option>
+            <option value="ai_vs_ai">AI 4人オート観戦（テスト用）</option>
           </select>
         </label>
 
         <label class="field">
-          <span>山牌セット</span>
-          <select id="select-tileset">
-            <option value="full136">標準136枚</option>
-            <option value="2p_compact">2人用コンパクト108枚（2m-8m抜き）</option>
+          <span>AI使用モデル</span>
+          <select id="select-ai-model">
+            <option value="builtin">内蔵ルールベースAI（高速・API不要）</option>
+            <option value="gemini-4-hydrogen">Gemini 4 Hydrogen（高速・低コスト）</option>
+            <option value="gemini-4-neon">Gemini 4 Neon（高精度・ガチ思考）</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash（互換）</option>
           </select>
         </label>
       </div>
 
-      <div class="field-grid">
+      <div class="field-grid-3">
         <label class="field">
-          <span>対面AI（Seat 1）モデル</span>
-          <select id="select-opp-model">
-            <option value="gemini-4-hydrogen">Gemini 4 Hydrogen（高速・低コスト）</option>
-            <option value="gemini-4-neon">Gemini 4 Neon（高精度・ガチ思考）</option>
-            <option value="gemini-2.5-flash">Gemini 2.5 Flash（互換）</option>
-            <option value="builtin">内蔵ルールベースAI（API不要）</option>
-          </select>
+          <span>下家(右) 性格</span>
+          <select id="select-persona-1"></select>
         </label>
-
         <label class="field">
-          <span>対面AI 性格・打ち筋</span>
-          <select id="select-opp-persona"></select>
+          <span>対面(上) 性格</span>
+          <select id="select-persona-2"></select>
+        </label>
+        <label class="field">
+          <span>上家(左) 性格</span>
+          <select id="select-persona-3"></select>
         </label>
       </div>
 
       <label class="field">
-        <span>カスタム作戦指示（任意）</span>
-        <input type="text" id="input-custom-prompt" placeholder="例：染め手（混一色・清一色）を積極的に狙って！" />
+        <span>AI共通カスタム作戦指示（任意）</span>
+        <input type="text" id="input-custom-prompt" placeholder="例：オーラスは順位を意識して着順アップを最優先して！" />
       </label>
 
       <div class="modal-footer">
         <button type="button" id="btn-close-settings" class="btn btn-secondary">閉じる</button>
-        <button type="submit" class="btn btn-primary">保存して新規対局</button>
+        <button type="submit" class="btn btn-primary">保存して新規半荘</button>
       </div>
     </form>
   </dialog>
@@ -163,10 +208,21 @@
   <!-- 局結果モーダル -->
   <dialog id="result-modal" class="modal">
     <div class="modal-card">
-      <h2 id="result-title">終局</h2>
+      <h2 id="result-title">局終了</h2>
       <div id="result-body" class="result-body"></div>
       <div class="modal-footer">
         <button type="button" id="btn-next-round" class="btn btn-primary">次の局へ</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 半荘最終精算モーダル -->
+  <dialog id="match-end-modal" class="modal">
+    <div class="modal-card modal-wide">
+      <h2 id="match-end-title">半荘終了・最終精算</h2>
+      <div id="match-end-body" class="result-body"></div>
+      <div class="modal-footer">
+        <button type="button" id="btn-match-restart" class="btn btn-primary">新しい半荘を始める</button>
       </div>
     </div>
   </dialog>
@@ -175,7 +231,7 @@
   <dialog id="md-modal" class="modal">
     <div class="modal-card modal-wide">
       <h2>AI送信用の盤面Markdownプレビュー</h2>
-      <textarea id="md-preview-text" readonly rows="20"></textarea>
+      <textarea id="md-preview-text" readonly rows="18"></textarea>
       <div class="modal-footer">
         <button type="button" id="btn-copy-md" class="btn btn-secondary">コピー</button>
         <button type="button" id="btn-close-md" class="btn btn-primary">閉じる</button>
