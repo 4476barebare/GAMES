@@ -9,22 +9,22 @@
 <body>
   <!-- ヘッダー（横スクロール対応） -->
   <header class="topbar">
-    <div class="brand">
-      <span class="badge">4P 半荘</span>
-      <h1>AI Mahjong Arena</h1>
-      <span class="save-indicator" id="save-indicator">自動保存ON</span>
-    </div>
-    <div class="topbar-actions">
-      <button id="btn-auto-tsumogiri" class="btn btn-secondary" title="リーチ中オートツモ切り切替">リーチ自動ツモ切: ON</button>
-      <button id="btn-toggle-open" class="btn btn-secondary" title="他家の手牌表示切替">手牌公開: OFF</button>
-      <button id="btn-show-log-mobile" class="btn btn-secondary mobile-only">ログ/思考</button>
-      <button id="btn-show-md" class="btn btn-secondary">盤面MD</button>
-      <button id="btn-settings" class="btn btn-secondary">設定 / API</button>
-      <button id="btn-new-game" class="btn btn-primary">新規半荘</button>
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="badge">4P半荘</span>
+        <h1>AI麻雀</h1>
+      </div>
+      <div class="topbar-actions">
+        <button id="btn-toggle-open" class="btn btn-secondary">公開:OFF</button>
+        <button id="btn-show-log-mobile" class="btn btn-secondary mobile-only">思考/ログ</button>
+        <button id="btn-show-md" class="btn btn-secondary">MD</button>
+        <button id="btn-settings" class="btn btn-secondary">設定/API</button>
+        <button id="btn-new-game" class="btn btn-primary">新規</button>
+      </div>
     </div>
   </header>
 
-  <!-- メインコンテナ（1画面固定・卓全体スワイプで手牌横スクロール） -->
+  <!-- メインコンテナ（画面全体は100dvh固定・手牌のみ横スクロール可） -->
   <main class="arena">
     <section class="table-board" id="table-board" aria-label="4人麻雀卓">
 
@@ -32,48 +32,48 @@
       <div class="seat-top">
         <div class="seat-header" id="seat-header-2">
           <span class="wind-tag" id="wind-2">西</span>
-          <strong class="seat-name" id="name-2">対面AI</strong>
+          <strong class="seat-name" id="name-2">対面</strong>
           <span class="seat-pts" id="pts-2">25,000</span>
           <span class="riichi-tag hidden" id="riichi-2">リーチ</span>
-          <span class="think-tag hidden" id="think-2">思考中...</span>
+          <span class="think-tag hidden" id="think-2">思考中</span>
         </div>
         <div class="hand-row hand-opp" id="hand-2"></div>
       </div>
 
-      <!-- 中段：左(上家 Seat 3) + 中央(4家の河・鳴き牌＆卓情報) + 右(下家 Seat 1) -->
+      <!-- 中段：左(上家 Seat 3・90度回転) + 中央(4家の河＆各家の副露＆HUD) + 右(下家 Seat 1・270度回転) -->
       <div class="table-middle">
-        <!-- 左：上家（Seat 3） -->
+        <!-- 左：上家（Seat 3）ラベルのみ -->
         <div class="seat-side seat-left">
-          <div class="seat-header vertical-header" id="seat-header-3">
+          <div class="rot-label rot-90" id="seat-header-3">
             <span class="wind-tag" id="wind-3">北</span>
-            <strong class="seat-name" id="name-3">上家AI</strong>
+            <strong class="seat-name" id="name-3">上家</strong>
             <span class="seat-pts" id="pts-3">25,000</span>
             <span class="riichi-tag hidden" id="riichi-3">リーチ</span>
-            <span class="think-tag hidden" id="think-3">思考中</span>
+            <span class="think-tag hidden" id="think-3">…</span>
           </div>
-          <div class="hand-side" id="hand-3"></div>
         </div>
 
-        <!-- 中央：4家の河＋鳴き牌とセンターHUD -->
+        <!-- 中央：4家の河と各家の副露（河の横に整列）＋ センターHUD -->
         <div class="center-square">
-          <!-- 対面の河＋鳴き牌（上） -->
-          <div class="river-meld-wrap river-wrap-top">
+          <!-- 対面の河（上）＋ 左側に270度回転で対面の副露（対面視点の右手側） -->
+          <div class="top-river-row">
+            <div class="melds-top-side" id="melds-2"></div>
             <div class="river-area river-top">
               <div class="river-grid" id="river-2"></div>
             </div>
-            <div class="meld-area meld-top" id="melds-2"></div>
           </div>
 
+          <!-- 中央行：上家の河＋副露（左） ／ HUD ／ 下家の副露＋河（右） -->
           <div class="center-row">
-            <!-- 上家の河＋鳴き牌（左） -->
-            <div class="river-meld-wrap river-wrap-left">
-              <div class="river-area river-left">
-                <div class="river-grid" id="river-3"></div>
+            <!-- 左：上家（Seat 3）河の下側に副露 -->
+            <div class="side-river-col side-river-left">
+              <div class="river-area river-side">
+                <div class="river-grid river-side-grid" id="river-3"></div>
               </div>
-              <div class="meld-area meld-side" id="melds-3"></div>
+              <div class="melds-side-horiz" id="melds-3"></div>
             </div>
 
-            <!-- センター卓情報ボックス -->
+            <!-- センター卓情報 -->
             <div class="center-hud">
               <div class="hud-round" id="round-label">東1局 0本場</div>
               <div class="hud-meta">
@@ -81,64 +81,66 @@
                 <span id="riichi-sticks">供託0</span>
               </div>
               <div class="hud-dora">
-                <span class="dora-label">ドラ表示</span>
+                <span class="dora-label">ドラ</span>
                 <div class="mini-tiles" id="dora-indicators"></div>
               </div>
               <div class="hud-turn" id="turn-banner">東家の番</div>
             </div>
 
-            <!-- 下家の河＋鳴き牌（右） -->
-            <div class="river-meld-wrap river-wrap-right">
-              <div class="river-area river-right">
-                <div class="river-grid" id="river-1"></div>
+            <!-- 右：下家（Seat 1）河の上側に副露 -->
+            <div class="side-river-col side-river-right">
+              <div class="melds-side-horiz" id="melds-1"></div>
+              <div class="river-area river-side">
+                <div class="river-grid river-side-grid" id="river-1"></div>
               </div>
-              <div class="meld-area meld-side" id="melds-1"></div>
             </div>
           </div>
 
-          <!-- 自分の河＋鳴き牌（下：鳴いた牌は自河の右側） -->
-          <div class="river-meld-wrap river-wrap-bottom">
+          <!-- 自分の河（下）＋ 右側に自分の副露（自視点の右手側） -->
+          <div class="bottom-river-row">
             <div class="river-area river-bottom">
               <div class="river-grid" id="river-0"></div>
             </div>
-            <div class="meld-area meld-bottom" id="melds-0"></div>
+            <div class="melds-self-side" id="melds-0"></div>
           </div>
         </div>
 
-        <!-- 右：下家（Seat 1） -->
+        <!-- 右：下家（Seat 1）ラベルのみ -->
         <div class="seat-side seat-right">
-          <div class="seat-header vertical-header" id="seat-header-1">
+          <div class="rot-label rot-270" id="seat-header-1">
             <span class="wind-tag" id="wind-1">南</span>
-            <strong class="seat-name" id="name-1">下家AI</strong>
+            <strong class="seat-name" id="name-1">下家</strong>
             <span class="seat-pts" id="pts-1">25,000</span>
             <span class="riichi-tag hidden" id="riichi-1">リーチ</span>
-            <span class="think-tag hidden" id="think-1">思考中</span>
+            <span class="think-tag hidden" id="think-1">…</span>
           </div>
-          <div class="hand-side" id="hand-1"></div>
         </div>
       </div>
 
       <!-- 下：自分（Seat 0） -->
       <div class="seat-bottom">
-        <div class="speech-ticker" id="speech-ticker">
-          <span class="ticker-speaker" id="ticker-speaker">卓情報</span>
-          <span class="ticker-text" id="ticker-text">半荘対局を開始しました。</span>
-        </div>
-
-        <!-- アクションバー（全選択肢表示・スルーは手牌タップ） -->
+        <!-- アクションバー -->
         <div class="action-bar" id="action-bar">
+          <div class="seat-header compact-self" id="seat-header-0">
+            <span class="wind-tag" id="wind-0">東</span>
+            <strong class="seat-name" id="name-0">あなた</strong>
+            <span class="seat-pts" id="pts-0">25,000</span>
+            <span class="riichi-tag hidden" id="riichi-0">リーチ</span>
+          </div>
           <div class="shanten-info" id="shanten-info">計算中...</div>
           <div class="action-buttons" id="action-buttons"></div>
         </div>
 
-        <!-- 自分の手牌（独立横スクロール） -->
-        <div class="hand-scroll-viewport" id="hand-scroll-viewport">
-          <div class="hand-row hand-self" id="hand-0"></div>
+        <!-- 自分の手牌 -->
+        <div class="self-tiles-container">
+          <div class="hand-scroll-wrap" id="hand-scroll-wrap">
+            <div class="hand-row hand-self" id="hand-0"></div>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- 右サイドパネル（内部のみ独立スクロール） -->
+    <!-- 右サイドパネル（AI思考ログ＆対局ログ） -->
     <aside class="side-panel" id="side-panel">
       <div class="panel-tabs">
         <button class="tab-btn active" data-tab="thoughts">AI思考ログ</button>
@@ -154,89 +156,28 @@
     </aside>
   </main>
 
-  <!-- 設定モーダル（座席別AIモデル・APIキー設定対応） -->
+  <!-- 設定モーダル -->
   <dialog id="settings-modal" class="modal">
     <form method="dialog" class="modal-card modal-wide" id="settings-form">
-      <h2>4人麻雀 設定 / 座席別AI・APIキー（BYOK）</h2>
-      <p class="hint">APIキーはブラウザ内 localStorage のみに保存されます。共通APIキーまたは座席別の個別キー・モデルを設定できます。</p>
+      <h2>4人麻雀 卓設定 / 座席別 APIキー（BYOK）</h2>
+      <p class="hint">各席ごとに異なるGemini APIキー・モデル・性格を個別に設定できます（ブラウザの localStorage にのみ保存）。APIキー空欄の席は性格別の内蔵AIで動作します。</p>
 
       <div class="field-grid">
         <label class="field">
           <span>対戦モード</span>
           <select id="select-match-mode">
-            <option value="human_vs_ai">人間 vs AI 3人（4人半荘）</option>
+            <option value="human_vs_ai">人間（自席） vs AI 3人</option>
             <option value="ai_vs_ai">AI 4人オート観戦（テスト用）</option>
           </select>
         </label>
 
         <label class="field">
-          <span>共通 Gemini API Key（未設定席に適用）</span>
-          <input type="password" id="input-api-key" placeholder="AIzaSy..." autocomplete="off" />
+          <span>共通フォールバック API Key（任意）</span>
+          <input type="password" id="input-global-api-key" placeholder="個別キー未入力の席に適用" autocomplete="off" />
         </label>
       </div>
 
-      <div class="seat-config-list">
-        <div class="seat-config-card" id="seat-cfg-0">
-          <strong>自家（あなた枠・AI観戦時）</strong>
-          <div class="field-grid-3">
-            <select id="select-model-0">
-              <option value="builtin">内蔵ルールベースAI</option>
-              <option value="gemini-4-hydrogen">Gemini 4 Hydrogen</option>
-              <option value="gemini-4-neon">Gemini 4 Neon</option>
-              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-            </select>
-            <select id="select-persona-0"></select>
-            <input type="password" id="input-key-0" placeholder="個別APIキー(任意)" autocomplete="off" />
-          </div>
-        </div>
-
-        <div class="seat-config-card">
-          <strong>下家（右・Seat 1）</strong>
-          <div class="field-grid-3">
-            <select id="select-model-1">
-              <option value="builtin">内蔵ルールベースAI</option>
-              <option value="gemini-4-hydrogen">Gemini 4 Hydrogen</option>
-              <option value="gemini-4-neon">Gemini 4 Neon</option>
-              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-            </select>
-            <select id="select-persona-1"></select>
-            <input type="password" id="input-key-1" placeholder="個別APIキー(任意)" autocomplete="off" />
-          </div>
-        </div>
-
-        <div class="seat-config-card">
-          <strong>対面（上・Seat 2）</strong>
-          <div class="field-grid-3">
-            <select id="select-model-2">
-              <option value="builtin">内蔵ルールベースAI</option>
-              <option value="gemini-4-hydrogen">Gemini 4 Hydrogen</option>
-              <option value="gemini-4-neon">Gemini 4 Neon</option>
-              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-            </select>
-            <select id="select-persona-2"></select>
-            <input type="password" id="input-key-2" placeholder="個別APIキー(任意)" autocomplete="off" />
-          </div>
-        </div>
-
-        <div class="seat-config-card">
-          <strong>上家（左・Seat 3）</strong>
-          <div class="field-grid-3">
-            <select id="select-model-3">
-              <option value="builtin">内蔵ルールベースAI</option>
-              <option value="gemini-4-hydrogen">Gemini 4 Hydrogen</option>
-              <option value="gemini-4-neon">Gemini 4 Neon</option>
-              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-            </select>
-            <select id="select-persona-3"></select>
-            <input type="password" id="input-key-3" placeholder="個別APIキー(任意)" autocomplete="off" />
-          </div>
-        </div>
-      </div>
-
-      <label class="field">
-        <span>AI共通カスタム作戦指示（任意）</span>
-        <input type="text" id="input-custom-prompt" placeholder="例：オーラスは順位を意識して着順アップを最優先して！" />
-      </label>
+      <div class="seat-config-list" id="seat-config-list"></div>
 
       <div class="modal-footer">
         <button type="button" id="btn-close-settings" class="btn btn-secondary">閉じる</button>
