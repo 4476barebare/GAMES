@@ -1,7 +1,6 @@
 /**
  * engine.js
- * 4人麻雀（半荘戦）鳴き完全対応エンジン
- * （チー[赤5選択対応]・ポン・大明槓・暗槓・加槓・喰い替え禁止・王牌分離管理・優先順位判定・性格別内蔵AI）
+ * 4人麻雀（半荘戦）鳴き完全対応エンジン（チー・ポン・大明槓・暗槓・加槓・優先順位判定・性格別内蔵AI）
  */
 
 import {
@@ -36,18 +35,11 @@ function buildWall() {
   for (let id = 0; id < 136; id++) ids.push(id);
   const shuffled = shuffle(ids);
   const dead = shuffled.splice(0, 14);
-  const rinshanTiles = dead.slice(0, 4);
-  const doraPool = [dead[4], dead[6], dead[8], dead[10], dead[12]];
-  const uraDoraPool = [dead[5], dead[7], dead[9], dead[11], dead[13]];
-
   return {
     live: shuffled,
     dead,
-    rinshanTiles,
-    doraPool,
-    uraDoraPool,
-    doraIndicators: [doraPool[0]],
-    uraDoraIndicators: [uraDoraPool[0]],
+    doraIndicators: [dead[4]],
+    uraDoraIndicators: [dead[5]],
     kanCount: 0,
     remaining: shuffled.length
   };
@@ -60,40 +52,19 @@ export function createMatchState(options = {}) {
       id: "p1",
       name: "内蔵(デジタル派)",
       control: "ai",
-      aiConfig: {
-        provider: "gemini",
-        model: "builtin",
-        personaId: "digital_balanced",
-        customPrompt: "",
-        fallbackActive: false,
-        fallbackReason: ""
-      }
+      aiConfig: { provider: "gemini", model: "builtin", apiKey: "", personaId: "digital_balanced", customPrompt: "" }
     },
     {
       id: "p2",
       name: "内蔵(超攻撃型)",
       control: "ai",
-      aiConfig: {
-        provider: "gemini",
-        model: "builtin",
-        personaId: "aggressive_riichi",
-        customPrompt: "",
-        fallbackActive: false,
-        fallbackReason: ""
-      }
+      aiConfig: { provider: "gemini", model: "builtin", apiKey: "", personaId: "aggressive_riichi", customPrompt: "" }
     },
     {
       id: "p3",
       name: "内蔵(鉄壁守備派)",
       control: "ai",
-      aiConfig: {
-        provider: "gemini",
-        model: "builtin",
-        personaId: "iron_defense",
-        customPrompt: "",
-        fallbackActive: false,
-        fallbackReason: ""
-      }
+      aiConfig: { provider: "gemini", model: "builtin", apiKey: "", personaId: "iron_defense", customPrompt: "" }
     }
   ];
 
@@ -101,25 +72,13 @@ export function createMatchState(options = {}) {
   const players = [];
   for (let i = 0; i < 4; i++) {
     const cfg = playerConfigs[i] || defaultPlayers[i];
-    let safeAiConfig = null;
-    if (cfg.aiConfig) {
-      safeAiConfig = {
-        provider: cfg.aiConfig.provider || "gemini",
-        model: cfg.aiConfig.model || "builtin",
-        personaId: cfg.aiConfig.personaId || "digital_balanced",
-        customPrompt: cfg.aiConfig.customPrompt || "",
-        fallbackActive: Boolean(cfg.aiConfig.fallbackActive),
-        fallbackReason: cfg.aiConfig.fallbackReason || ""
-      };
-    }
-
     players.push({
       seatIndex: i,
       wind: WINDS[i],
       id: cfg.id,
       name: cfg.name,
       control: cfg.control,
-      aiConfig: safeAiConfig,
+      aiConfig: cfg.aiConfig,
       points: options.initialPoints || 25000,
       hand: [],
       drawnTile: null,
@@ -137,7 +96,7 @@ export function createMatchState(options = {}) {
   }
 
   const state = {
-    schemaVersion: "1.3",
+    schemaVersion: "1.2",
     roomId: options.roomId || null,
     version: 1,
     updatedAt: Date.now(),
@@ -150,7 +109,6 @@ export function createMatchState(options = {}) {
       redDora: true,
       openTanyao: true,
       allowCalls: true,
-      kuikaeProhibited: true,
       initialPoints: 25000,
       returnPoints: RETURN_POINTS
     },
@@ -167,7 +125,6 @@ export function createMatchState(options = {}) {
       phase: "discard",
       turnCount: 1,
       isRinshanTurn: false,
-      forbiddenDiscardKinds: [],
       lastDiscard: null,
       pendingClaims: [],
       claimResponses: {}
@@ -218,7 +175,6 @@ function dealRound(prevState) {
     phase: "discard",
     turnCount: 1,
     isRinshanTurn: false,
-    forbiddenDiscardKinds: [],
     lastDiscard: null,
     pendingClaims: [],
     claimResponses: {}
@@ -344,38 +300,6 @@ function finalizeHanchan(state, reason) {
   return state;
 }
 
-function getUniqueLabelsForKind(handTileIds, kind, redDora) {
-  const labels = [];
-  const seen = new Set();
-  for (const id of handTileIds) {
-    if (tileIdToKind(id) !== kind) continue;
-    const lbl = tileIdToLabel(id, redDora);
-    if (!seen.has(lbl)) {
-      seen.add(lbl);
-      labels.push(lbl);
-    }
-  }
-  // 通常5を先、赤5（0m/0p/0s）を後に並べる
-  labels.sort((a, b) => {
-    const aRed = a.startsWith("0") ? 1 : 0;
-    const bRed = b.startsWith("0") ? 1 : 0;
-    return aRed - bRed;
-  });
-  return labels;
-}
-
-function buildChiPairsForKinds(handTileIds, kindA, kindB, redDora) {
-  const labelsA = getUniqueLabelsForKind(handTileIds, kindA, redDora);
-  const labelsB = getUniqueLabelsForKind(handTileIds, kindB, redDora);
-  const pairs = [];
-  for (const a of labelsA) {
-    for (const b of labelsB) {
-      pairs.push([a, b]);
-    }
-  }
-  return pairs;
-}
-
 function getChiOptions(handTileIds, discardedTileId, redDora) {
   const dk = tileIdToKind(discardedTileId);
   if (dk >= 27) return [];
@@ -384,47 +308,22 @@ function getChiOptions(handTileIds, discardedTileId, redDora) {
   const options = [];
 
   if (num >= 2 && counts[dk - 2] > 0 && counts[dk - 1] > 0) {
-    options.push(...buildChiPairsForKinds(handTileIds, dk - 2, dk - 1, redDora));
+    options.push(pickBestChiPair(handTileIds, dk - 2, dk - 1, redDora));
   }
   if (num >= 1 && num <= 7 && counts[dk - 1] > 0 && counts[dk + 1] > 0) {
-    options.push(...buildChiPairsForKinds(handTileIds, dk - 1, dk + 1, redDora));
+    options.push(pickBestChiPair(handTileIds, dk - 1, dk + 1, redDora));
   }
   if (num <= 6 && counts[dk + 1] > 0 && counts[dk + 2] > 0) {
-    options.push(...buildChiPairsForKinds(handTileIds, dk + 1, dk + 2, redDora));
+    options.push(pickBestChiPair(handTileIds, dk + 1, dk + 2, redDora));
   }
 
   return options;
 }
 
-/**
- * ポン・チー成立直後の「喰い替え禁止」対象牌（kindId配列）を返す
- * - ポン: 現物喰い替え（鳴いた牌と同種）を禁止
- * - チー: 現物喰い替え ＋ スジ喰い替え（両面待ちの逆端）を禁止
- */
-export function getKuikaeForbiddenKinds(callAction, calledKind, consumedKinds = []) {
-  if (callAction === "pon") {
-    return [calledKind];
-  }
-  if (callAction === "chi") {
-    const allKinds = [...consumedKinds, calledKind].sort((a, b) => a - b);
-    const minK = allKinds[0];
-    const maxK = allKinds[2];
-    const forbidden = [calledKind];
-    if (calledKind === minK && maxK % 9 < 8) {
-      forbidden.push(maxK + 1);
-    } else if (calledKind === maxK && minK % 9 > 0) {
-      forbidden.push(minK - 1);
-    }
-    return forbidden;
-  }
-  return [];
-}
-
-function hasLegalDiscardAfterCall(handTileIds, consumedIds, forbiddenKinds) {
-  if (!Array.isArray(consumedIds) || consumedIds.length === 0) return false;
-  const remain = handTileIds.filter((id) => !consumedIds.includes(id));
-  if (remain.length === 0) return false;
-  return remain.some((id) => !forbiddenKinds.includes(tileIdToKind(id)));
+function pickBestChiPair(handTileIds, kindA, kindB, redDora) {
+  const idA = handTileIds.find((id) => tileIdToKind(id) === kindA);
+  const idB = handTileIds.find((id) => tileIdToKind(id) === kindB);
+  return [tileIdToLabel(idA, redDora), tileIdToLabel(idB, redDora)];
 }
 
 export function getLegalActions(state, seatIndex) {
@@ -489,18 +388,8 @@ export function getLegalActions(state, seatIndex) {
       return actions;
     }
 
-    const forbiddenKinds = Array.isArray(state.turn.forbiddenDiscardKinds)
-      ? state.turn.forbiddenDiscardKinds
-      : [];
-    const allowedHand =
-      forbiddenKinds.length > 0
-        ? allHand.filter((tid) => !forbiddenKinds.includes(tileIdToKind(tid)))
-        : allHand;
-    // 安全弁：万一すべての手牌が禁止牌だった場合のみ進行不能を防ぐ
-    const discardableHand = allowedHand.length > 0 ? allowedHand : allHand;
-
     const seenLabels = new Set();
-    for (const tid of discardableHand) {
+    for (const tid of allHand) {
       const label = tileIdToLabel(tid, red);
       if (seenLabels.has(label)) continue;
       seenLabels.add(label);
@@ -557,11 +446,7 @@ export function getLegalActions(state, seatIndex) {
       const counts = toCounts34(p.hand);
 
       if (counts[dk] >= 2) {
-        const ponConsumed = p.hand.filter((id) => tileIdToKind(id) === dk).slice(0, 2);
-        const ponForbidden = getKuikaeForbiddenKinds("pon", dk);
-        if (hasLegalDiscardAfterCall(p.hand, ponConsumed, ponForbidden)) {
-          actions.push({ action: "pon", tile: dLabel });
-        }
+        actions.push({ action: "pon", tile: dLabel });
       }
 
       if (counts[dk] === 3 && state.wall.kanCount < 4) {
@@ -572,16 +457,7 @@ export function getLegalActions(state, seatIndex) {
       if (isShimocha) {
         const chiPairs = getChiOptions(p.hand, last.tileId, red);
         for (const pair of chiPairs) {
-          const consumedIds = findMultipleTileIdsByLabels(p.hand, pair, red);
-          if (!consumedIds || consumedIds.length !== 2) continue;
-          const chiForbidden = getKuikaeForbiddenKinds(
-            "chi",
-            dk,
-            consumedIds.map(tileIdToKind)
-          );
-          if (hasLegalDiscardAfterCall(p.hand, consumedIds, chiForbidden)) {
-            actions.push({ action: "chi", tile: dLabel, consume: pair });
-          }
+          actions.push({ action: "chi", tile: dLabel, consume: pair });
         }
       }
     }
@@ -640,7 +516,6 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
     deltas[seatIndex] = totalCollected + riichiBonus;
     state.players[seatIndex].points += deltas[seatIndex];
     state.round.riichiSticks = 0;
-    state.turn.forbiddenDiscardKinds = [];
     state.status = "round_end";
     state.lastResult = {
       type: "tsumo",
@@ -691,23 +566,11 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       throw new Error(`Illegal discard tile: ${actionObj.tile}`);
     }
 
-    const forbiddenKinds = Array.isArray(state.turn.forbiddenDiscardKinds)
-      ? state.turn.forbiddenDiscardKinds
-      : [];
-    if (
-      forbiddenKinds.length > 0 &&
-      forbiddenKinds.includes(tileIdToKind(targetId)) &&
-      allHand.some((id) => !forbiddenKinds.includes(tileIdToKind(id)))
-    ) {
-      throw new Error(`Kuikae forbidden discard tile: ${actionObj.tile}`);
-    }
-
     const isTsumogiri = p.drawnTile !== null && targetId === p.drawnTile;
     const isRiichiDeclare = actionObj.action === "riichi" && !p.isRiichi;
 
     p.isTempFuriten = false;
     state.turn.isRinshanTurn = false;
-    state.turn.forbiddenDiscardKinds = [];
 
     if (isRiichiDeclare) {
       p.isRiichi = true;
@@ -838,7 +701,6 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
       for (let i = 0; i < n; i++) state.players[i].points += deltas[i];
 
       state.round.riichiSticks = 0;
-      state.turn.forbiddenDiscardKinds = [];
       state.status = "round_end";
       state.lastResult = {
         type: "ron",
@@ -920,16 +782,10 @@ function executeCallMeld(state, callerIdx, fromSeatIdx, calledTileId, resp) {
   state.turn.claimResponses = {};
 
   if (resp.action === "daiminkan") {
-    state.turn.forbiddenDiscardKinds = [];
     revealNewDora(state);
     return drawRinshanTile(state, callerIdx);
   }
 
-  state.turn.forbiddenDiscardKinds = getKuikaeForbiddenKinds(
-    resp.action,
-    dk,
-    consumedIds.map(tileIdToKind)
-  );
   caller.drawnTile = null;
   state.turn.isRinshanTurn = false;
   state.version += 1;
@@ -939,19 +795,8 @@ function executeCallMeld(state, callerIdx, fromSeatIdx, calledTileId, resp) {
 
 function revealNewDora(state) {
   state.wall.kanCount += 1;
-  const kIdx = state.wall.kanCount;
-  if (Array.isArray(state.wall.doraPool) && Array.isArray(state.wall.uraDoraPool)) {
-    if (state.wall.doraPool[kIdx] !== undefined) {
-      state.wall.doraIndicators.push(state.wall.doraPool[kIdx]);
-    }
-    if (state.wall.uraDoraPool[kIdx] !== undefined) {
-      state.wall.uraDoraIndicators.push(state.wall.uraDoraPool[kIdx]);
-    }
-    return;
-  }
-  // 旧セーブデータ後方互換フォールバック
-  const nextIndIdx = 4 + kIdx * 2;
-  const nextUraIdx = 5 + kIdx * 2;
+  const nextIndIdx = 4 + state.wall.kanCount * 2;
+  const nextUraIdx = 5 + state.wall.kanCount * 2;
   if (state.wall.dead[nextIndIdx] !== undefined) {
     state.wall.doraIndicators.push(state.wall.dead[nextIndIdx]);
   }
@@ -962,23 +807,12 @@ function revealNewDora(state) {
 
 function drawRinshanTile(state, seatIndex) {
   const player = state.players[seatIndex];
-  let rinshanTile;
-  if (Array.isArray(state.wall.rinshanTiles) && state.wall.rinshanTiles.length > 0) {
-    rinshanTile = state.wall.rinshanTiles.shift();
-  } else {
-    // 旧セーブデータ後方互換（先頭shiftでドラ位置を崩さないよう末尾から取得）
-    rinshanTile = state.wall.dead.pop();
-  }
-  // 王牌14枚を維持するため、カンごとに海底牌（live末尾）を1枚減らす
-  if (state.wall.live.length > 0) {
-    state.wall.live.pop();
-  }
+  const rinshanTile = state.wall.dead.shift();
   player.drawnTile = rinshanTile !== undefined ? rinshanTile : state.wall.live.shift();
   state.wall.remaining = state.wall.live.length;
   state.turn.playerIndex = seatIndex;
   state.turn.phase = "discard";
   state.turn.isRinshanTurn = true;
-  state.turn.forbiddenDiscardKinds = [];
   state.version += 1;
   state.updatedAt = Date.now();
   return state;
@@ -1004,7 +838,6 @@ function advanceToNextDraw(state, nextSeatIndex) {
       }
     }
 
-    state.turn.forbiddenDiscardKinds = [];
     state.status = "round_end";
     state.lastResult = {
       type: "draw",
@@ -1024,7 +857,6 @@ function advanceToNextDraw(state, nextSeatIndex) {
   state.turn.playerIndex = nextSeatIndex;
   state.turn.phase = "discard";
   state.turn.isRinshanTurn = false;
-  state.turn.forbiddenDiscardKinds = [];
   state.turn.pendingClaims = [];
   state.turn.claimResponses = {};
   if (nextSeatIndex === state.round.dealerIndex) {
@@ -1067,11 +899,9 @@ export function chooseFallbackAction(state, seatIndex) {
       if (persona === "occult_flow" && currentShanten <= 1) return ponAct;
     }
 
-    const chiActs = legal.filter((a) => a.action === "chi");
-    if (chiActs.length > 0 && (persona === "aggressive_riichi" || persona === "occult_flow") && currentShanten === 1) {
-      // 赤5を使わずに済むチーがあれば優先、なければ先頭候補
-      const nonRedChi = chiActs.find((a) => !a.consume.some((lbl) => lbl.startsWith("0")));
-      return nonRedChi || chiActs[0];
+    const chiAct = legal.find((a) => a.action === "chi");
+    if (chiAct && (persona === "aggressive_riichi" || persona === "occult_flow") && currentShanten === 1) {
+      return chiAct;
     }
 
     return passAct;
@@ -1084,18 +914,13 @@ export function chooseFallbackAction(state, seatIndex) {
   });
   state.wall.doraIndicators.forEach((d) => visible.push(d));
 
-  const legalDiscardLabels = new Set(
-    legal.filter((a) => a.action === "discard").map((a) => a.tile)
-  );
-
   const candidates = analyzeDiscardCandidates(
     p.hand,
     p.drawnTile,
     visible,
     red,
     p.melds.length
-  ).filter((c) => legalDiscardLabels.has(c.label));
-
+  );
   if (candidates.length === 0) return legal[0];
 
   const riichiOpponents = state.players.filter((pl) => pl.seatIndex !== seatIndex && pl.isRiichi);

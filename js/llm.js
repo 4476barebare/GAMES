@@ -1,14 +1,11 @@
 /**
  * llm.js
- * Gemini API 通信・Structured Outputs（チー赤5識別/ポン/カン対応）
- * ・座席別APIキーは storage.js から通信時のみ取得（gameState には保持しない）
- * ・APIトークン／クォータ超過・認証エラー時は該当席をその半荘のみ自動で内蔵簡易AIへ切替
+ * Gemini API 通信・Structured Outputs（チー/ポン/カン対応）・座席別APIキー対応
  */
 
 import { labelToKind } from "./tiles.js";
 import { getLegalActions, chooseFallbackAction } from "./engine.js";
 import { buildTurnPromptMarkdown } from "./markdown.js";
-import { getSeatApiKey } from "./storage.js";
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
@@ -24,7 +21,7 @@ const RESPONSE_SCHEMA = {
     consume: {
       type: "ARRAY",
       items: { type: "STRING" },
-      description: "actionがchiの場合のみ、手牌から出す2枚の牌表記（例: ['2m', '3m'] または ['0m', '6m']）。それ以外は空配列。"
+      description: "actionがchiの場合のみ、手牌から出す2枚の牌表記（例: ['2m', '3m']）。それ以外は空配列。"
     },
     thought: {
       type: "STRING",
@@ -51,26 +48,14 @@ function matchLegalAction(legalActions, rawDecision) {
     if (chiOptions.length === 0) return null;
     if (chiOptions.length === 1) return chiOptions[0];
 
-    const reqLabels = Array.isArray(rawDecision.consume)
-      ? rawDecision.consume.map((s) => String(s).trim()).sort()
-      : [];
-
-    // 1. 赤5（0m/0p/0s）と通常5を区別した完全一致を優先
-    const exactMatch = chiOptions.find((opt) => {
-      const optLabels = opt.consume.map((s) => String(s).trim()).sort();
-      return optLabels.length === reqLabels.length && optLabels.every((v, i) => v === reqLabels[i]);
-    });
-    if (exactMatch) return exactMatch;
-
-    // 2. フォールバック：種類（kind）一致
     const reqKinds = Array.isArray(rawDecision.consume)
       ? rawDecision.consume.map(labelToKind).sort((a, b) => a - b)
       : [];
-    const kindMatch = chiOptions.find((opt) => {
+    const matched = chiOptions.find((opt) => {
       const optKinds = opt.consume.map(labelToKind).sort((a, b) => a - b);
       return optKinds.length === reqKinds.length && optKinds.every((v, i) => v === reqKinds[i]);
     });
-    return kindMatch || chiOptions[0];
+    return matched || chiOptions[0];
   }
 
   if (["discard", "riichi", "ankan", "kakan"].includes(actType)) {
@@ -88,34 +73,6 @@ function matchLegalAction(legalActions, rawDecision) {
     }
   }
   return null;
-}
-
-function classifyQuotaOrAuthError(status, errText) {
-  const body = String(errText || "");
-  const isQuotaPattern =
-    /RESOURCE_EXHAUSTED|QUOTA|RATE_LIMIT|INSUFFICIENT_QUOTA|BILLING|TOKEN.*LIMIT|EXCEEDED/i.test(
-      body
-    );
-  const isAuthPattern = /API_KEY_INVALID|INVALID_ARGUMENT.*API.?KEY|PERMISSION_DENIED|UNAUTHENTICATED/i.test(
-    body
-  );
-
-  if (status === 429 || status === 402 || isQuotaPattern) {
-    return {
-      shouldSwitchToBuiltin: true,
-      shortReason: `HTTP ${status} / APIトークン・クォータ上限到達`
-    };
-  }
-  if (status === 401 || status === 403 || isAuthPattern) {
-    return {
-      shouldSwitchToBuiltin: true,
-      shortReason: `HTTP ${status} / APIキー認証・権限エラー`
-    };
-  }
-  return {
-    shouldSwitchToBuiltin: false,
-    shortReason: `HTTP ${status}`
-  };
 }
 
 async function callGeminiEndpoint({ apiKey, model, systemPrompt, userPrompt }) {
@@ -148,11 +105,7 @@ async function callGeminiEndpoint({ apiKey, model, systemPrompt, userPrompt }) {
 
   if (!res.ok) {
     const errText = await res.text();
-    const classified = classifyQuotaOrAuthError(res.status, errText);
-    const err = new Error(`Gemini API Error (${res.status}): ${errText.slice(0, 140)}`);
-    err.shouldSwitchToBuiltin = classified.shouldSwitchToBuiltin;
-    err.shortReason = classified.shortReason;
-    throw err;
+    throw new Error(`Gemini API Error (${res.status}): ${errText.slice(0, 140)}`);
   }
 
   const data = await res.json();
@@ -162,59 +115,40 @@ async function callGeminiEndpoint({ apiKey, model, systemPrompt, userPrompt }) {
   return JSON.parse(text);
 }
 
-function buildBuiltinDecision(state, seatIndex, prefixNote = "") {
-  const player = state.players[seatIndex];
-  const fallback = chooseFallbackAction(state, seatIndex);
-  const talkMap = {
-    riichi: "リーチ！勝負だ。",
-    tsumo: "ツモ！いただきました。",
-    ron: "ロン！そこだ！",
-    pon: "ポン！",
-    chi: "チー！",
-    daiminkan: "カン！",
-    ankan: "暗槓！",
-    kakan: "加槓！",
-    pass: "ここはスルー。",
-    discard: `よし、${fallback.tile}切り。`
-  };
-  const tag = prefixNote ? `${prefixNote} ` : "";
-  return {
-    actionObj: fallback,
-    thought: `${tag}[内蔵:${player.aiConfig?.personaId || "standard"}] ${fallback.action}${
-      fallback.tile ? " (" + fallback.tile + ")" : ""
-    } を選択。`,
-    talk: talkMap[fallback.action] || "これで行こう。",
-    switchedToBuiltin: false,
-    switchReason: ""
-  };
-}
-
-export async function decideAiMove({ state, seatIndex, baseRulesMd, personaPrompt }) {
+export async function decideAiMove({ state, seatIndex, fallbackApiKey, baseRulesMd, personaPrompt }) {
   const player = state.players[seatIndex];
   const legalActions = getLegalActions(state, seatIndex);
   const model = player.aiConfig?.model || "builtin";
+  const effectiveApiKey = (player.aiConfig?.apiKey || "").trim() || (fallbackApiKey || "").trim();
 
-  // 既にこの半荘でトークン切れ等により内蔵AIへ自動切替済みの場合はAPIを叩かない
-  if (player.aiConfig?.fallbackActive) {
-    return buildBuiltinDecision(state, seatIndex, "[API上限切替中]");
-  }
-
-  const effectiveApiKey = getSeatApiKey(seatIndex);
   if (!effectiveApiKey || model === "builtin") {
-    return buildBuiltinDecision(state, seatIndex);
+    const fallback = chooseFallbackAction(state, seatIndex);
+    const talkMap = {
+      riichi: "リーチ！勝負だ。",
+      tsumo: "ツモ！いただきました。",
+      ron: "ロン！そこだ！",
+      pon: "ポン！",
+      chi: "チー！",
+      daiminkan: "カン！",
+      ankan: "暗槓！",
+      kakan: "加槓！",
+      pass: "ここはスルー。",
+      discard: `よし、${fallback.tile}切り。`
+    };
+    return {
+      actionObj: fallback,
+      thought: `[内蔵:${player.aiConfig?.personaId || "standard"}] ${fallback.action}${
+        fallback.tile ? " (" + fallback.tile + ")" : ""
+      } を選択。`,
+      talk: talkMap[fallback.action] || "これで行こう。"
+    };
   }
 
   const customRule = player.aiConfig?.customPrompt
-    ? `
-# 追加の特別作戦指示
-${player.aiConfig.customPrompt}
-`
+    ? `\n# 追加の特別作戦指示\n${player.aiConfig.customPrompt}\n`
     : "";
 
-  const systemPrompt = `${baseRulesMd}
-
-# あなたのキャラクター・打ち筋
-${personaPrompt}${customRule}`;
+  const systemPrompt = `${baseRulesMd}\n\n# あなたのキャラクター・打ち筋\n${personaPrompt}${customRule}`;
   const userPrompt = buildTurnPromptMarkdown(state, seatIndex);
 
   try {
@@ -229,15 +163,11 @@ ${personaPrompt}${customRule}`;
       return {
         actionObj: valid1,
         thought: decision1.thought || "",
-        talk: decision1.talk || "",
-        switchedToBuiltin: false,
-        switchReason: ""
+        talk: decision1.talk || ""
       };
     }
 
-    const retryPrompt = `${userPrompt}
-
-【エラー修正指示】前回の回答 \`${JSON.stringify(
+    const retryPrompt = `${userPrompt}\n\n【エラー修正指示】前回の回答 \`${JSON.stringify(
       decision1
     )}\` は合法アクション一覧に含まれていません。必ずセクション5のリストにある有効な行動を選び直してください。`;
 
@@ -252,9 +182,7 @@ ${personaPrompt}${customRule}`;
       return {
         actionObj: valid2,
         thought: decision2.thought || "",
-        talk: decision2.talk || "",
-        switchedToBuiltin: false,
-        switchReason: ""
+        talk: decision2.talk || ""
       };
     }
 
@@ -262,24 +190,10 @@ ${personaPrompt}${customRule}`;
   } catch (err) {
     console.warn("AI fallback triggered:", err);
     const fallback = chooseFallbackAction(state, seatIndex);
-
-    if (err.shouldSwitchToBuiltin) {
-      const reason = err.shortReason || "API上限到達";
-      return {
-        actionObj: fallback,
-        thought: `[自動切替: ${reason}] この半荘の残りは内蔵簡易AIで続行します。`,
-        talk: "思考回路が限界だ…ここからは直感で打つ！",
-        switchedToBuiltin: true,
-        switchReason: reason
-      };
-    }
-
     return {
       actionObj: fallback,
       thought: `[自動補正: ${err.message}] 内蔵AI推奨手を実行しました。`,
-      talk: "おっと、手元が狂ったな…",
-      switchedToBuiltin: false,
-      switchReason: ""
+      talk: "おっと、手元が狂ったな…"
     };
   }
 }

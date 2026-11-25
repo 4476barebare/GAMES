@@ -1,6 +1,6 @@
 /**
  * markdown.js
- * 4人麻雀（半荘・鳴きあり・喰い替え禁止対応）の局面レポートMarkdown生成
+ * 4人麻雀（半荘・鳴きあり）の局面レポートMarkdown生成
  */
 
 import { tileIdToLabel, indicatorToDoraKind, kindToLabel } from "./tiles.js";
@@ -101,19 +101,6 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
       )}\``
     );
   }
-  const forbiddenKinds =
-    state.turn.phase === "discard" &&
-    state.turn.playerIndex === seatIndex &&
-    Array.isArray(state.turn.forbiddenDiscardKinds)
-      ? state.turn.forbiddenDiscardKinds
-      : [];
-  if (forbiddenKinds.length > 0) {
-    lines.push(
-      `- **喰い替え禁止牌（この巡は切れません）:** ${forbiddenKinds
-        .map((k) => `\`${kindToLabel(k)}\``)
-        .join(", ")}`
-    );
-  }
   const furiten = me.isFuriten || me.isTempFuriten || me.isRiichiFuriten;
   lines.push(`- **フリテン状態:** ${furiten ? "フリテン中（ロン不可）" : "なし"}`);
   lines.push("");
@@ -127,16 +114,7 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
     });
     state.wall.doraIndicators.forEach((d) => visible.push(d));
 
-    const legalDiscardLabels = new Set(
-      legalActions.filter((a) => a.action === "discard").map((a) => a.tile)
-    );
-    const candidates = analyzeDiscardCandidates(
-      me.hand,
-      me.drawnTile,
-      visible,
-      red,
-      me.melds.length
-    ).filter((c) => legalDiscardLabels.has(c.label));
+    const candidates = analyzeDiscardCandidates(me.hand, me.drawnTile, visible, red, me.melds.length);
     const bestShanten = candidates.length > 0 ? candidates[0].shantenAfter : "-";
 
     lines.push("## 4. システム解析カンペ（自作エンジン算出・厳密値）");
@@ -198,6 +176,5 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
     }
   }
 
-  return lines.join("
-");
+  return lines.join("\n");
 }

@@ -1,6 +1,6 @@
 /**
  * main.js
- * 4人麻雀（半荘・鳴きあり・卓全体スワイプ手牌スクロール・リーチ後オートツモ切り・座席別API個別管理）統括
+ * 4人麻雀（半荘・鳴きあり・卓全体スワイプ手牌スクロール・リーチ後オートツモ切り）統括
  */
 
 import { tileIdToLabel } from "./tiles.js";
@@ -15,14 +15,12 @@ import { decideAiMove } from "./llm.js";
 import {
   loadSettings,
   saveSettings,
-  getSeatApiKey,
   loadMatchSession,
   clearMatchSession
 } from "./storage.js";
 import { LocalSyncAdapter } from "./sync.js";
 import {
   renderGame,
-  updateSelectedTileHighlight,
   renderLogs,
   showRoundResultModal,
   showMatchEndModal
@@ -78,10 +76,8 @@ function pushLog(text) {
   renderLogs(gameLogs);
 }
 
-function buildSeatDisplayName(seatCfg) {
-  const hasSeatKey = Boolean((seatCfg.apiKey || "").trim());
-  const isBuiltin = seatCfg.model === "builtin" || !hasSeatKey;
-  const tag = isBuiltin ? "内蔵" : "AI";
+function buildSeatDisplayName(seatIndex, seatCfg) {
+  const tag = seatCfg.model === "builtin" ? "内蔵" : "AI";
   return `${tag}(${getPersonaName(seatCfg.personaId)})`;
 }
 
@@ -108,16 +104,14 @@ async function startNewMatch() {
     }
     return {
       id: `p${idx}`,
-      name: buildSeatDisplayName(sCfg),
+      name: buildSeatDisplayName(idx, sCfg),
       control: "ai",
-      // APIキーは gameState に絶対に格納しない（GAS拡張時の漏洩防止）
       aiConfig: {
         provider: "gemini",
         model: sCfg.model,
+        apiKey: sCfg.apiKey,
         personaId: sCfg.personaId,
-        customPrompt: sCfg.customPrompt,
-        fallbackActive: false,
-        fallbackReason: ""
+        customPrompt: sCfg.customPrompt
       }
     };
   });
@@ -134,26 +128,14 @@ async function restoreOrStartMatch() {
   const saved = loadMatchSession();
   if (saved) {
     gameState = saved.gameState;
-    let needsResave = false;
     if (Array.isArray(gameState.players)) {
       gameState.players.forEach((p) => {
         if (typeof p.name === "string") {
-          const cleanedName = p.name.replace(/^[自下対上]・/, "");
-          if (cleanedName !== p.name) {
-            p.name = cleanedName;
-            needsResave = true;
-          }
-        }
-        if (p.aiConfig && "apiKey" in p.aiConfig) {
-          delete p.aiConfig.apiKey;
-          needsResave = true;
+          p.name = p.name.replace(/^[自下対上]・/, "");
         }
       });
     }
     gameLogs = Array.isArray(saved.logs) ? saved.logs : [];
-    if (needsResave) {
-      await syncAdapter.saveState(gameState, gameLogs);
-    }
     renderLogs(gameLogs);
     refreshUI();
 
@@ -181,9 +163,8 @@ function refreshUI() {
           const label = tileIdToLabel(tileId, gameState.config.redDora);
           handlePlayerAction(0, { action: "discard", tile: label, tileId }, {}, loopToken);
         } else {
-          // 1回目タップは全再描画せず、手牌の選択ハイライトのみ即時更新
           selectedTileId = tileId;
-          updateSelectedTileHighlight(selectedTileId);
+          refreshUI();
         }
       },
       onHumanPass: () => {
@@ -247,6 +228,7 @@ async function stepGameLoop(token) {
   // 1. 人間プレイヤー（Seat 0）のリーチ中オートツモ切り判定
   const self = gameState.players[0];
   if (self.control === "human" && self.isRiichi) {
+    // 自分の打牌フェーズ：ツモ和了できるなら自動停止してボタン表示、それ以外はオートツモ切り
     if (gameState.turn.phase === "discard" && gameState.turn.playerIndex === 0) {
       const legal = getLegalActions(gameState, 0);
       const canTsumo = legal.some((a) => a.action === "tsumo");
@@ -259,9 +241,12 @@ async function stepGameLoop(token) {
           return;
         }
       }
+      // ツモ和了できる場合は人間のボタン操作待ちで停止
       return;
     }
 
+    // リーチ中はエンジン仕様上、他家打牌に対する「ロン」のみ pendingClaims に含まれるため、
+    // claim_check に Seat 0 が入っていればロン可能＝自動で止まってロンボタン表示
     if (gameState.turn.phase === "claim_check" && gameState.turn.pendingClaims.includes(0)) {
       return;
     }
@@ -288,9 +273,8 @@ async function stepGameLoop(token) {
 
   const aiPlayer = gameState.players[targetSeat];
   const hasApi =
-    Boolean(getSeatApiKey(targetSeat)) &&
-    aiPlayer.aiConfig?.model !== "builtin" &&
-    !aiPlayer.aiConfig?.fallbackActive;
+    Boolean((aiPlayer.aiConfig?.apiKey || settings.globalApiKey || "").trim()) &&
+    aiPlayer.aiConfig?.model !== "builtin";
   const waitMs = hasApi ? 300 : 220;
   await new Promise((r) => setTimeout(r, waitMs));
   if (token !== loopToken) return;
@@ -299,23 +283,13 @@ async function stepGameLoop(token) {
   const decision = await decideAiMove({
     state: gameState,
     seatIndex: targetSeat,
+    fallbackApiKey: settings.globalApiKey,
     baseRulesMd,
     personaPrompt
   });
 
   if (token !== loopToken) return;
   thinkingSeat = null;
-
-  // APIトークン切れ／認証エラー時は、この半荘の該当席のみ自動で内蔵簡易AIへ切替
-  if (decision.switchedToBuiltin && aiPlayer.aiConfig) {
-    const prevName = aiPlayer.name;
-    aiPlayer.aiConfig.fallbackActive = true;
-    aiPlayer.aiConfig.fallbackReason = decision.switchReason || "API上限到達";
-    aiPlayer.name = `内蔵(${getPersonaName(aiPlayer.aiConfig.personaId)})`;
-    pushLog(
-      `⚠️ ${prevName}: ${aiPlayer.aiConfig.fallbackReason}のため、この半荘は内蔵AIへ自動切替しました`
-    );
-  }
 
   await handlePlayerAction(
     targetSeat,
@@ -327,6 +301,7 @@ async function stepGameLoop(token) {
 
 /**
  * 卓全体のどこを横スワイプ（ドラッグ）しても手牌エリアが横スクロールするように連動
+ * （アクションボタン・設定ボタン等のタップ操作は干渉しないよう除外）
  */
 function setupGlobalTableSwipeScroll() {
   const board = document.getElementById("table-board");
@@ -342,6 +317,7 @@ function setupGlobalTableSwipeScroll() {
     return Boolean(target.closest("button, input, select, textarea, a, dialog, #action-buttons"));
   };
 
+  // タッチ操作（スマホ・タブレット）
   board.addEventListener(
     "touchstart",
     (e) => {
@@ -350,6 +326,7 @@ function setupGlobalTableSwipeScroll() {
         isTracking = false;
         return;
       }
+      // hand-scroll-wrap 自体はブラウザ標準の慣性スクロールに任せる
       if (e.target.closest("#hand-scroll-wrap")) {
         isTracking = false;
         return;
@@ -385,6 +362,7 @@ function setupGlobalTableSwipeScroll() {
     isTracking = false;
   });
 
+  // マウスドラッグ操作（PC確認用）
   board.addEventListener("mousedown", (e) => {
     if (e.button !== 0 || isInteractiveControl(e.target)) return;
     isTracking = true;
@@ -447,7 +425,7 @@ function renderSeatSettingsForm(currentSettings) {
         </label>
         <label class="field">
           <span>個別 Gemini API Key</span>
-          <input type="password" id="seat-apikey-${idx}" value="${sCfg.apiKey || ""}" placeholder="AIzaSy... (空欄なら内蔵AI)" autocomplete="off" />
+          <input type="password" id="seat-apikey-${idx}" value="${sCfg.apiKey || ""}" placeholder="AIzaSy... (空欄なら共通キー)" autocomplete="off" />
         </label>
       </div>
       <label class="field">
@@ -490,6 +468,7 @@ function bindEvents() {
   document.getElementById("btn-settings").addEventListener("click", () => {
     const s = loadSettings();
     document.getElementById("select-match-mode").value = s.matchMode;
+    document.getElementById("input-global-api-key").value = s.globalApiKey || "";
     renderSeatSettingsForm(s);
     settingsModal.showModal();
   });
@@ -509,6 +488,7 @@ function bindEvents() {
 
     saveSettings({
       matchMode: document.getElementById("select-match-mode").value,
+      globalApiKey: document.getElementById("input-global-api-key").value.trim(),
       seats: nextSeats
     });
     settingsModal.close();
