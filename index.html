@@ -11,10 +11,11 @@
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand">
-        <span class="badge">4P半荘</span>
+        <span class="badge" id="mode-badge">4P半荘</span>
         <h1>AI麻雀</h1>
       </div>
       <div class="topbar-actions">
+        <button id="btn-online-lobby" class="btn btn-secondary">オンライン卓</button>
         <button id="btn-show-log-mobile" class="btn btn-secondary mobile-only">思考/ログ</button>
         <button id="btn-show-md" class="btn btn-secondary">MD</button>
         <button id="btn-settings" class="btn btn-secondary">設定/API</button>
@@ -173,7 +174,7 @@
 
       <div class="modal-footer">
         <button type="button" id="btn-close-settings" class="btn btn-secondary">閉じる</button>
-        <button type="submit" class="btn btn-primary">保存して新規半荘</button>
+        <button type="submit" id="btn-save-settings" class="btn btn-primary">保存して新規半荘</button>
       </div>
     </form>
   </dialog>
@@ -208,6 +209,89 @@
       <div class="modal-footer">
         <button type="button" id="btn-copy-md" class="btn btn-secondary">コピー</button>
         <button type="button" id="btn-close-md" class="btn btn-primary">閉じる</button>
+      </div>
+    </div>
+  </dialog>
+
+  
+  <!-- オンライン対戦ロビー＆待機室モーダル -->
+  <dialog id="online-modal" class="modal">
+    <div class="modal-card modal-wide">
+      <h2>オンライン対人戦ロビー（GAS 4人ハイブリッド卓）</h2>
+      <p id="online-status-msg" class="hint"></p>
+
+      <!-- 入室・部屋作成ビュー -->
+      <div id="lobby-entry-view" class="lobby-section">
+        <label class="field">
+          <span>あなたの表示名（全角/半角16文字以内）</span>
+          <input type="text" id="online-player-name" maxlength="16" placeholder="例：雀士タロウ" />
+        </label>
+
+        <div class="field-grid">
+          <div class="seat-cfg-card">
+            <div class="seat-cfg-title">新しい部屋を作る</div>
+            <label class="checkbox-row">
+              <input type="checkbox" id="online-room-public" checked />
+              <span>公開ロビーに一覧表示する</span>
+            </label>
+            <button type="button" id="btn-create-online-room" class="btn btn-primary">部屋を作成</button>
+          </div>
+
+          <div class="seat-cfg-card">
+            <div class="seat-cfg-title">4桁の部屋番号で参加</div>
+            <input type="text" id="online-join-room-id" maxlength="4" inputmode="numeric" placeholder="例：4821" />
+            <button type="button" id="btn-join-online-room" class="btn btn-call">番号で参加</button>
+          </div>
+        </div>
+
+        <div class="seat-cfg-card">
+          <div class="lobby-list-header">
+            <span class="seat-cfg-title">募集中の公開ルーム一覧</span>
+            <button type="button" id="btn-refresh-rooms" class="btn btn-secondary">更新</button>
+          </div>
+          <div id="public-rooms-list" class="public-rooms-list"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="btn-switch-offline" class="btn btn-secondary">オフライン1人対戦に戻る</button>
+          <button type="button" id="btn-close-online" class="btn btn-secondary">閉じる</button>
+        </div>
+      </div>
+
+      <!-- 待機室ビュー -->
+      <div id="lobby-waiting-view" class="lobby-section hidden">
+        <div class="waiting-banner">
+          <div>部屋番号: <strong id="waiting-room-code">----</strong></div>
+          <span class="badge" id="waiting-room-visibility">公開ロビー表示中</span>
+        </div>
+
+        <label class="field">
+          <span>招待URL（コピーして友達に送信）</span>
+          <div class="invite-url-row">
+            <input type="text" id="waiting-invite-url" readonly />
+            <button type="button" id="btn-copy-invite-url" class="btn btn-secondary">コピー</button>
+          </div>
+        </label>
+
+        <div id="waiting-seats-list" class="waiting-seats-list"></div>
+        <p id="waiting-host-hint" class="hint"></p>
+
+        <div class="modal-footer">
+          <button type="button" id="btn-leave-online-room" class="btn btn-secondary">退出する</button>
+          <button type="button" id="btn-start-online-match" class="btn btn-primary">対局開始（席順ランダム）</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ホスト用キック誤タップ防止確認モーダル -->
+  <dialog id="kick-confirm-modal" class="modal">
+    <div class="modal-card">
+      <h2>プレイヤーのキック確認</h2>
+      <p id="kick-confirm-body" class="result-body"></p>
+      <div class="modal-footer">
+        <button type="button" id="btn-cancel-kick" class="btn btn-secondary">キャンセル</button>
+        <button type="button" id="btn-confirm-kick" class="btn btn-danger">キックを実行する</button>
       </div>
     </div>
   </dialog>
