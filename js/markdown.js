@@ -198,6 +198,5 @@ export function buildTurnPromptMarkdown(state, seatIndex) {
     }
   }
 
-  return lines.join("
-");
+  return lines.join("\n");
 }

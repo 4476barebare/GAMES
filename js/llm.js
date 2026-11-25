@@ -205,16 +205,10 @@ export async function decideAiMove({ state, seatIndex, baseRulesMd, personaPromp
   }
 
   const customRule = player.aiConfig?.customPrompt
-    ? `
-# 追加の特別作戦指示
-${player.aiConfig.customPrompt}
-`
+    ? `\n# 追加の特別作戦指示\n${player.aiConfig.customPrompt}\n`
     : "";
 
-  const systemPrompt = `${baseRulesMd}
-
-# あなたのキャラクター・打ち筋
-${personaPrompt}${customRule}`;
+  const systemPrompt = `${baseRulesMd}\n\n# あなたのキャラクター・打ち筋\n${personaPrompt}${customRule}`;
   const userPrompt = buildTurnPromptMarkdown(state, seatIndex);
 
   try {
@@ -235,11 +229,7 @@ ${personaPrompt}${customRule}`;
       };
     }
 
-    const retryPrompt = `${userPrompt}
-
-【エラー修正指示】前回の回答 \`${JSON.stringify(
-      decision1
-    )}\` は合法アクション一覧に含まれていません。必ずセクション5のリストにある有効な行動を選び直してください。`;
+    const retryPrompt = `${userPrompt}\n\n【エラー修正指示】前回の回答 \`${JSON.stringify(decision1)}\` は合法アクション一覧に含まれていません。必ずセクション5のリストにある有効な行動を選び直してください。`;
 
     const decision2 = await callGeminiEndpoint({
       apiKey: effectiveApiKey,
