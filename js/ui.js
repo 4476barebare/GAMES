@@ -9,6 +9,41 @@ import { getLegalActions } from "./engine.js";
 import { analyzeDiscardCandidates } from "./shanten.js";
 
 const WIND_JP = { E: "東", S: "南", W: "西", N: "北" };
+let lastAutoScrollDrawKey = null;
+
+function createMiniTileIcon(code) {
+  const span = document.createElement("span");
+  span.className = "btn-tile-icon";
+  span.setAttribute("aria-label", String(code));
+  span.innerHTML = getTileSvg(code);
+  return span;
+}
+
+function createActionTileButton(className, labelText, tileCodes, suffixText = "") {
+  const b = document.createElement("button");
+  b.className = `${className} btn-with-tiles`;
+
+  const lbl = document.createElement("span");
+  lbl.textContent = labelText;
+  b.appendChild(lbl);
+
+  if (Array.isArray(tileCodes) && tileCodes.length > 0) {
+    const group = document.createElement("span");
+    group.className = "btn-tile-group";
+    for (const code of tileCodes) {
+      group.appendChild(createMiniTileIcon(code));
+    }
+    b.appendChild(group);
+  }
+
+  if (suffixText) {
+    const suf = document.createElement("span");
+    suf.textContent = suffixText;
+    b.appendChild(suf);
+  }
+
+  return b;
+}
 
 function createTileElement(tileId, options = {}) {
   const div = document.createElement("div");
@@ -67,8 +102,7 @@ function renderMelds(containerEl, melds, redDora) {
 
 export function renderGame(state, uiOptions, handlers) {
   const red = state.config.redDora;
-  const showAllHands =
-    uiOptions.openHand || state.status === "round_end" || state.status === "match_end";
+  const showAllHands = state.status === "round_end" || state.status === "match_end";
 
   // 中央HUD
   document.getElementById("round-label").textContent = `${WIND_JP[state.round.wind]}${
@@ -202,6 +236,20 @@ export function renderGame(state, uiOptions, handlers) {
               : null
           })
         );
+
+        // ツモってきた際は毎回手牌スクロールを右端（ツモ牌側）へリセット
+        if (state.status === "playing" && state.turn.phase === "discard" && state.turn.playerIndex === 0) {
+          const drawKey = `${state.round.roundsPlayed}-${state.round.wind}${state.round.number}-${state.round.honba}-${state.turn.turnCount}-${p.drawnTile}-${p.melds.length}-${state.wall.remaining}`;
+          if (drawKey !== lastAutoScrollDrawKey) {
+            lastAutoScrollDrawKey = drawKey;
+            scrollWrap.scrollLeft = scrollWrap.scrollWidth;
+            requestAnimationFrame(() => {
+              scrollWrap.scrollLeft = scrollWrap.scrollWidth;
+            });
+          }
+        }
+      } else {
+        lastAutoScrollDrawKey = null;
       }
     } else if (seat === 2) {
       for (const tid of p.hand) {
@@ -272,9 +320,12 @@ export function renderGame(state, uiOptions, handlers) {
 
     // 1. ツモ・ロン
     for (const act of legal.filter((a) => a.action === "tsumo" || a.action === "ron")) {
-      const b = document.createElement("button");
-      b.className = "btn btn-danger";
-      b.textContent = `${act.action === "tsumo" ? "ツモ" : "ロン"}(${act.winInfo.points})`;
+      const b = createActionTileButton(
+        "btn btn-danger",
+        act.action === "tsumo" ? "ツモ" : "ロン",
+        act.tile ? [act.tile] : [],
+        `(${act.winInfo.points})`
+      );
       b.onclick = () => handlers.onHumanAction(act);
       btnBox.appendChild(b);
     }
@@ -282,9 +333,7 @@ export function renderGame(state, uiOptions, handlers) {
     // 2. リーチ
     const riichiActs = legal.filter((a) => a.action === "riichi");
     for (const rAct of riichiActs) {
-      const b = document.createElement("button");
-      b.className = "btn btn-warn";
-      b.textContent = `立直(${rAct.tile})`;
+      const b = createActionTileButton("btn btn-warn", "立直", [rAct.tile]);
       b.onclick = () => handlers.onHumanAction(rAct);
       btnBox.appendChild(b);
     }
@@ -292,18 +341,14 @@ export function renderGame(state, uiOptions, handlers) {
     // 3. ポン・大明槓・暗槓・加槓
     for (const cAct of legal.filter((a) => ["pon", "daiminkan", "ankan", "kakan"].includes(a.action))) {
       const labelMap = { pon: "ポン", daiminkan: "カン", ankan: "暗槓", kakan: "加槓" };
-      const b = document.createElement("button");
-      b.className = "btn btn-call";
-      b.textContent = `${labelMap[cAct.action]}(${cAct.tile})`;
+      const b = createActionTileButton("btn btn-call", labelMap[cAct.action], [cAct.tile]);
       b.onclick = () => handlers.onHumanAction(cAct);
       btnBox.appendChild(b);
     }
 
-    // 4. チー
+    // 4. チー（消費牌をSVGで表示）
     for (const chiAct of legal.filter((a) => a.action === "chi")) {
-      const b = document.createElement("button");
-      b.className = "btn btn-call";
-      b.textContent = `チー[${chiAct.consume.join("")}]`;
+      const b = createActionTileButton("btn btn-call", "チー", chiAct.consume);
       b.onclick = () => handlers.onHumanAction(chiAct);
       btnBox.appendChild(b);
     }

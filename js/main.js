@@ -27,14 +27,12 @@ import {
 } from "./ui.js";
 
 const SEAT_NAMES = ["自席（手前）", "下家（右）", "対面（上）", "上家（左）"];
-const SEAT_SHORT = ["自", "下", "対", "上"];
 
 let gameState = null;
 let gameLogs = [];
 let settings = loadSettings();
 let baseRulesMd = "";
 let personas = [];
-let openHand = false;
 let thinkingSeat = null;
 let selectedTileId = null;
 let isProcessing = false;
@@ -80,7 +78,7 @@ function pushLog(text) {
 
 function buildSeatDisplayName(seatIndex, seatCfg) {
   const tag = seatCfg.model === "builtin" ? "内蔵" : "AI";
-  return `${SEAT_SHORT[seatIndex]}・${tag}(${getPersonaName(seatCfg.personaId)})`;
+  return `${tag}(${getPersonaName(seatCfg.personaId)})`;
 }
 
 async function startNewMatch() {
@@ -130,6 +128,13 @@ async function restoreOrStartMatch() {
   const saved = loadMatchSession();
   if (saved) {
     gameState = saved.gameState;
+    if (Array.isArray(gameState.players)) {
+      gameState.players.forEach((p) => {
+        if (typeof p.name === "string") {
+          p.name = p.name.replace(/^[自下対上]・/, "");
+        }
+      });
+    }
     gameLogs = Array.isArray(saved.logs) ? saved.logs : [];
     renderLogs(gameLogs);
     refreshUI();
@@ -149,7 +154,7 @@ async function restoreOrStartMatch() {
 function refreshUI() {
   renderGame(
     gameState,
-    { openHand, thinkingSeat, selectedTileId },
+    { thinkingSeat, selectedTileId },
     {
       onHumanTileTap: (tileId) => {
         if (suppressNextClickAfterSwipe) return;
@@ -439,13 +444,6 @@ function bindEvents() {
     if (confirm("現在の半荘を破棄して、東1局から新しく始めますか？")) {
       startNewMatch();
     }
-  });
-
-  const openBtn = document.getElementById("btn-toggle-open");
-  openBtn.addEventListener("click", () => {
-    openHand = !openHand;
-    openBtn.textContent = `公開:${openHand ? "ON" : "OFF"}`;
-    refreshUI();
   });
 
   document.querySelectorAll(".tab-btn").forEach((btn) => {

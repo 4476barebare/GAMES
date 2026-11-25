@@ -50,19 +50,19 @@ export function createMatchState(options = {}) {
     { id: "p0", name: "あなた", control: "human", aiConfig: null },
     {
       id: "p1",
-      name: "下家(デジタル)",
+      name: "内蔵(デジタル派)",
       control: "ai",
       aiConfig: { provider: "gemini", model: "builtin", apiKey: "", personaId: "digital_balanced", customPrompt: "" }
     },
     {
       id: "p2",
-      name: "対面(超攻撃)",
+      name: "内蔵(超攻撃型)",
       control: "ai",
       aiConfig: { provider: "gemini", model: "builtin", apiKey: "", personaId: "aggressive_riichi", customPrompt: "" }
     },
     {
       id: "p3",
-      name: "上家(鉄壁守備)",
+      name: "内蔵(鉄壁守備派)",
       control: "ai",
       aiConfig: { provider: "gemini", model: "builtin", apiKey: "", personaId: "iron_defense", customPrompt: "" }
     }
