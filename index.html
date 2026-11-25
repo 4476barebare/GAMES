@@ -159,22 +159,15 @@
   <dialog id="settings-modal" class="modal">
     <form method="dialog" class="modal-card modal-wide" id="settings-form">
       <h2>4人麻雀 卓設定 / 座席別 APIキー（BYOK）</h2>
-      <p class="hint">各席ごとに異なるGemini APIキー・モデル・性格を個別に設定できます（ブラウザの localStorage にのみ保存）。APIキー空欄の席は性格別の内蔵AIで動作します。</p>
+      <p class="hint">各席ごとに個別のGemini APIキー・モデル・性格を設定します（ブラウザの localStorage にのみ保存し、対局データには含めません）。APIキー空欄の席、または対局中にAPIトークン／クォータ上限に達した席は自動的に内蔵AIで動作します。</p>
 
-      <div class="field-grid">
-        <label class="field">
-          <span>対戦モード</span>
-          <select id="select-match-mode">
-            <option value="human_vs_ai">人間（自席） vs AI 3人</option>
-            <option value="ai_vs_ai">AI 4人オート観戦（テスト用）</option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span>共通フォールバック API Key（任意）</span>
-          <input type="password" id="input-global-api-key" placeholder="個別キー未入力の席に適用" autocomplete="off" />
-        </label>
-      </div>
+      <label class="field">
+        <span>対戦モード</span>
+        <select id="select-match-mode">
+          <option value="human_vs_ai">人間（自席） vs AI 3人</option>
+          <option value="ai_vs_ai">AI 4人オート観戦（テスト用）</option>
+        </select>
+      </label>
 
       <div class="seat-config-list" id="seat-config-list"></div>
 
