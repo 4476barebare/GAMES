@@ -1,6 +1,9 @@
 /**
  * ui.js
- * 4人麻雀 UI描画（差分描画ガード・1タップ即時ハイライト・喰い替え禁止牌グレーアウト・SVG牌描画）
+ * 4人麻雀 UI描画
+ * ・相対席マッピング（viewerSeat基準：自分がどの席でも常に手前・下家右・対面・上家左に描画）
+ * ・差分描画ガード・1タップ即時ハイライト・喰い替え禁止牌グレーアウト・SVG牌描画
+ * ・局結果モーダル（オンライン時は全員OK人数表示＆ボタン制御）
  */
 
 import { tileIdToKind, tileIdToLabel } from "./tiles.js";
@@ -13,6 +16,14 @@ let lastAutoScrollDrawKey = null;
 let lastShantenCacheKey = null;
 let lastActionButtonsKey = null;
 let activeHandlers = null;
+
+function toVisualSeat(actualSeat, viewerSeat) {
+  return (actualSeat - viewerSeat + 4) % 4;
+}
+
+function toActualSeat(visualSeat, viewerSeat) {
+  return (viewerSeat + visualSeat) % 4;
+}
 
 function createMiniTileIcon(code) {
   const span = document.createElement("span");
@@ -100,9 +111,9 @@ export function updateSelectedTileHighlight(selectedTileId) {
 }
 
 function renderMelds(containerEl, melds, redDora) {
-  const key = `${redDora ? 1 : 0}|` + melds
-    .map((m) => `${m.type}:${m.calledTile}:${m.tiles.join(",")}`)
-    .join(";");
+  const key =
+    `${redDora ? 1 : 0}|` +
+    melds.map((m) => `${m.type}:${m.calledTile}:${m.tiles.join(",")}`).join(";");
   if (containerEl.dataset.renderKey === key) return;
   containerEl.dataset.renderKey = key;
 
@@ -129,6 +140,7 @@ function renderMelds(containerEl, melds, redDora) {
 export function renderGame(state, uiOptions, handlers) {
   activeHandlers = handlers;
   const red = state.config.redDora;
+  const viewerSeat = Number.isInteger(uiOptions.viewerSeat) ? uiOptions.viewerSeat : 0;
   const showAllHands = state.status === "round_end" || state.status === "match_end";
 
   // 中央HUD
@@ -160,33 +172,43 @@ export function renderGame(state, uiOptions, handlers) {
     banner.textContent = `${WIND_JP[activePlayer.wind]}:${activePlayer.name}`;
   }
 
-  // 直前の相手（Seat 1, 2, 3）の最新捨て牌IDを特定
+  // 直前の相手（自分の画面上で visualSeat !== 0）の最新捨て牌IDを特定
   const lastDiscard = state.turn.lastDiscard;
   const latestOppDiscardTileId =
-    lastDiscard && lastDiscard.playerIndex !== 0 ? lastDiscard.tileId : null;
+    lastDiscard && toVisualSeat(lastDiscard.playerIndex, viewerSeat) !== 0
+      ? lastDiscard.tileId
+      : null;
 
-  // 全4席の情報・河・副露・手牌を描画（変更のないDOMは再構築スキップ）
-  for (let seat = 0; seat < 4; seat++) {
-    const p = state.players[seat];
-    document.getElementById(`wind-${seat}`).textContent = WIND_JP[p.wind];
-    document.getElementById(`name-${seat}`).textContent = p.name;
-    document.getElementById(`pts-${seat}`).textContent = p.points.toLocaleString();
-    document.getElementById(`riichi-${seat}`).classList.toggle("hidden", !p.isRiichi);
+  // 全4席（visualSeat 0=手前, 1=下家右, 2=対面上, 3=上家左）を描画
+  for (let vSeat = 0; vSeat < 4; vSeat++) {
+    const actualSeat = toActualSeat(vSeat, viewerSeat);
+    const p = state.players[actualSeat];
 
-    const headerEl = document.getElementById(`seat-header-${seat}`);
-    const isTurn = state.status === "playing" && state.turn.playerIndex === seat;
+    document.getElementById(`wind-${vSeat}`).textContent = WIND_JP[p.wind];
+    document.getElementById(`name-${vSeat}`).textContent = p.name;
+    document.getElementById(`pts-${vSeat}`).textContent = p.points.toLocaleString();
+    document.getElementById(`riichi-${vSeat}`).classList.toggle("hidden", !p.isRiichi);
+
+    const headerEl = document.getElementById(`seat-header-${vSeat}`);
+    const isTurn = state.status === "playing" && state.turn.playerIndex === actualSeat;
     headerEl.classList.toggle("active-turn", isTurn);
 
-    const thinkEl = document.getElementById(`think-${seat}`);
+    const thinkEl = document.getElementById(`think-${vSeat}`);
     if (thinkEl) {
-      thinkEl.classList.toggle("hidden", uiOptions.thinkingSeat !== seat);
+      const isThinking =
+        uiOptions.thinkingSeat === actualSeat ||
+        (state.status === "playing" &&
+          actualSeat !== viewerSeat &&
+          ((state.turn.phase === "discard" && state.turn.playerIndex === actualSeat) ||
+            (state.turn.phase === "claim_check" && state.turn.pendingClaims.includes(actualSeat))));
+      thinkEl.classList.toggle("hidden", !isThinking);
     }
 
     // 河（差分描画ガード）
-    const riverEl = document.getElementById(`river-${seat}`);
+    const riverEl = document.getElementById(`river-${vSeat}`);
     const visibleDiscards = p.discards.filter((d) => d.calledBy === null);
     const riverKey =
-      `${red ? 1 : 0}|${seat !== 0 ? latestOppDiscardTileId : ""}|` +
+      `${red ? 1 : 0}|${vSeat !== 0 ? latestOppDiscardTileId : ""}|` +
       visibleDiscards
         .map((d) => `${d.tileId}:${d.isRiichi ? 1 : 0}:${d.isTsumogiri ? 1 : 0}`)
         .join(",");
@@ -195,7 +217,7 @@ export function renderGame(state, uiOptions, handlers) {
       riverEl.innerHTML = "";
       visibleDiscards.forEach((d, idx) => {
         const isLatestOpp =
-          seat !== 0 &&
+          vSeat !== 0 &&
           idx === visibleDiscards.length - 1 &&
           latestOppDiscardTileId !== null &&
           d.tileId === latestOppDiscardTileId;
@@ -212,28 +234,28 @@ export function renderGame(state, uiOptions, handlers) {
       });
     }
 
-    // 4家それぞれの副露（差分描画ガード内蔵）
-    const meldsEl = document.getElementById(`melds-${seat}`);
+    // 4家それぞれの副露
+    const meldsEl = document.getElementById(`melds-${vSeat}`);
     if (meldsEl) {
       renderMelds(meldsEl, p.melds, red);
     }
 
-    // 手牌（Seat 0＝自分、Seat 2＝対面）
-    const handEl = document.getElementById(`hand-${seat}`);
+    // 手牌（vSeat === 0＝自分、vSeat === 2＝対面）
+    const handEl = document.getElementById(`hand-${vSeat}`);
     if (!handEl) continue;
 
-    if (seat === 0) {
+    if (vSeat === 0) {
       const isHumanDiscardTurn =
         state.status === "playing" &&
         p.control === "human" &&
         state.turn.phase === "discard" &&
-        state.turn.playerIndex === 0;
+        state.turn.playerIndex === viewerSeat;
 
       const isHumanClaimTurn =
         state.status === "playing" &&
         p.control === "human" &&
         state.turn.phase === "claim_check" &&
-        state.turn.pendingClaims.includes(0);
+        state.turn.pendingClaims.includes(viewerSeat);
 
       const forbiddenKinds =
         isHumanDiscardTurn && Array.isArray(state.turn.forbiddenDiscardKinds)
@@ -253,6 +275,7 @@ export function renderGame(state, uiOptions, handlers) {
         : null;
 
       const selfHandKey = [
+        viewerSeat,
         red ? 1 : 0,
         isHumanDiscardTurn ? 1 : 0,
         isHumanClaimTurn ? 1 : 0,
@@ -306,10 +329,13 @@ export function renderGame(state, uiOptions, handlers) {
         updateSelectedTileHighlight(isHumanDiscardTurn ? uiOptions.selectedTileId : null);
       }
 
-      // ツモってきた際は毎回手牌スクロールを右端（ツモ牌側）へリセット
       if (p.drawnTile !== null) {
-        if (state.status === "playing" && state.turn.phase === "discard" && state.turn.playerIndex === 0) {
-          const drawKey = `${state.round.roundsPlayed}-${state.round.wind}${state.round.number}-${state.round.honba}-${state.turn.turnCount}-${p.drawnTile}-${p.melds.length}-${state.wall.remaining}`;
+        if (
+          state.status === "playing" &&
+          state.turn.phase === "discard" &&
+          state.turn.playerIndex === viewerSeat
+        ) {
+          const drawKey = `${viewerSeat}-${state.round.roundsPlayed}-${state.round.wind}${state.round.number}-${state.round.honba}-${state.turn.turnCount}-${p.drawnTile}-${p.melds.length}-${state.wall.remaining}`;
           if (drawKey !== lastAutoScrollDrawKey) {
             lastAutoScrollDrawKey = drawKey;
             scrollWrap.scrollLeft = scrollWrap.scrollWidth;
@@ -321,8 +347,8 @@ export function renderGame(state, uiOptions, handlers) {
       } else {
         lastAutoScrollDrawKey = null;
       }
-    } else if (seat === 2) {
-      const oppHandKey = `${red ? 1 : 0}|${showAllHands ? 1 : 0}|${p.hand.join(",")}|${p.drawnTile ?? "none"}`;
+    } else if (vSeat === 2) {
+      const oppHandKey = `${viewerSeat}|${red ? 1 : 0}|${showAllHands ? 1 : 0}|${p.hand.join(",")}|${p.drawnTile ?? "none"}`;
       if (handEl.dataset.renderKey !== oppHandKey) {
         handEl.dataset.renderKey = oppHandKey;
         handEl.innerHTML = "";
@@ -349,13 +375,13 @@ export function renderGame(state, uiOptions, handlers) {
     }
   }
 
-  // 自分（Seat 0）のアクションバー＆全選択肢表示
-  const self = state.players[0];
+  // 自席（viewerSeat）のアクションバー＆全選択肢表示
+  const self = state.players[viewerSeat];
   const isHumanClaimTurn =
     state.status === "playing" &&
     self.control === "human" &&
     state.turn.phase === "claim_check" &&
-    state.turn.pendingClaims.includes(0);
+    state.turn.pendingClaims.includes(viewerSeat);
 
   const actionBarEl = document.getElementById("action-bar");
   const selfHeaderEl = document.getElementById("seat-header-0");
@@ -367,7 +393,7 @@ export function renderGame(state, uiOptions, handlers) {
   shantenEl.classList.toggle("hidden", isHumanClaimTurn);
 
   if (!isHumanClaimTurn) {
-    const shantenKey = `${state.version}|${state.round.roundsPlayed}|${self.hand.join(",")}|${self.drawnTile ?? "none"}`;
+    const shantenKey = `${viewerSeat}|${state.version}|${state.round.roundsPlayed}|${self.hand.join(",")}|${self.drawnTile ?? "none"}`;
     if (shantenKey !== lastShantenCacheKey) {
       lastShantenCacheKey = shantenKey;
       const visible = [];
@@ -393,12 +419,12 @@ export function renderGame(state, uiOptions, handlers) {
     }
   }
 
-  const actionsKey = `${state.version}|${state.status}|${self.control}|${state.turn.phase}|${state.turn.playerIndex}|${isHumanClaimTurn ? 1 : 0}`;
+  const actionsKey = `${viewerSeat}|${state.version}|${state.status}|${self.control}|${state.turn.phase}|${state.turn.playerIndex}|${isHumanClaimTurn ? 1 : 0}`;
   if (actionsKey !== lastActionButtonsKey) {
     lastActionButtonsKey = actionsKey;
     btnBox.innerHTML = "";
     if (state.status === "playing" && self.control === "human") {
-      const legal = getLegalActions(state, 0);
+      const legal = getLegalActions(state, viewerSeat);
 
       // 1. ツモ・ロン
       for (const act of legal.filter((a) => a.action === "tsumo" || a.action === "ron")) {
@@ -428,7 +454,7 @@ export function renderGame(state, uiOptions, handlers) {
         btnBox.appendChild(b);
       }
 
-      // 4. チー（通常5・赤5の選択も含め消費牌をSVGで表示）
+      // 4. チー
       for (const chiAct of legal.filter((a) => a.action === "chi")) {
         const b = createActionTileButton("btn btn-call", "チー", chiAct.consume);
         b.onclick = () => activeHandlers?.onHumanAction && activeHandlers.onHumanAction(chiAct);
@@ -437,32 +463,60 @@ export function renderGame(state, uiOptions, handlers) {
     }
   }
 
-  renderThoughtCards(state);
+  renderThoughtCards(state, uiOptions);
 }
 
-function renderThoughtCards(state) {
+function renderThoughtCards(state, uiOptions = {}) {
   const container = document.getElementById("thought-cards");
-  const key = state.players
-    .filter((p) => p.control === "ai")
-    .map((p) => `${p.seatIndex}|${p.wind}|${p.name}|${p.points}|${p.lastTalk}|${p.lastThought}`)
-    .join("||");
+  const isOnlineHost = Boolean(uiOptions.isOnlineHost);
+  const myPlayerId = uiOptions.myPlayerId || "";
+  const key =
+    `${isOnlineHost ? 1 : 0}|${myPlayerId}|` +
+    state.players
+      .map(
+        (p) =>
+          `${p.seatIndex}|${p.id}|${p.control}|${p.wind}|${p.name}|${p.points}|${p.lastTalk}|${p.lastThought}`
+      )
+      .join("||");
   if (container.dataset.renderKey === key) return;
   container.dataset.renderKey = key;
 
   container.innerHTML = "";
   for (const p of state.players) {
-    if (p.control !== "ai") continue;
-    const card = document.createElement("div");
-    card.className = "thought-card";
-    card.innerHTML = `
-      <div class="thought-card-head">
-        <span>[${WIND_JP[p.wind]}] ${escapeHtml(p.name)}</span>
-        <span>${p.points.toLocaleString()}点</span>
-      </div>
-      <div class="thought-card-talk">${p.lastTalk ? `「${escapeHtml(p.lastTalk)}」` : "（待機中）"}</div>
-      <div class="thought-card-body">${p.lastThought ? escapeHtml(p.lastThought) : "まだ打牌していません。"}</div>
-    `;
-    container.appendChild(card);
+    if (p.control === "ai") {
+      const card = document.createElement("div");
+      card.className = "thought-card";
+      card.innerHTML = `
+        <div class="thought-card-head">
+          <span>[${WIND_JP[p.wind]}] ${escapeHtml(p.name)}</span>
+          <span>${p.points.toLocaleString()}点</span>
+        </div>
+        <div class="thought-card-talk">${p.lastTalk ? `「${escapeHtml(p.lastTalk)}」` : "（待機中）"}</div>
+        <div class="thought-card-body">${p.lastThought ? escapeHtml(p.lastThought) : "まだ打牌していません。"}</div>
+      `;
+      container.appendChild(card);
+    } else if (isOnlineHost && p.id !== myPlayerId) {
+      // オンライン対局中：ホストには他人間プレイヤーのキック（AI代行切替）ボタンを表示
+      const card = document.createElement("div");
+      card.className = "thought-card";
+      const head = document.createElement("div");
+      head.className = "thought-card-head";
+      head.innerHTML = `<span>[${WIND_JP[p.wind]}] ${escapeHtml(p.name)}（人間）</span><span>${p.points.toLocaleString()}点</span>`;
+      card.appendChild(head);
+
+      const kickBtn = document.createElement("button");
+      kickBtn.type = "button";
+      kickBtn.className = "btn btn-danger";
+      kickBtn.style.marginTop = "4px";
+      kickBtn.textContent = "このプレイヤーをキック（AI代行へ切替）";
+      kickBtn.onclick = () => {
+        if (activeHandlers?.onKickPlayer) {
+          activeHandlers.onKickPlayer(p.id, p.name);
+        }
+      };
+      card.appendChild(kickBtn);
+      container.appendChild(card);
+    }
   }
 }
 
@@ -477,7 +531,7 @@ export function renderLogs(logs) {
   }
 }
 
-export function showRoundResultModal(state) {
+export function showRoundResultModal(state, options = {}) {
   const res = state.lastResult;
   if (!res) return;
 
@@ -539,7 +593,32 @@ export function showRoundResultModal(state) {
 
   const nextBtn = document.getElementById("btn-next-round");
   const isBusted = state.players.some((p) => p.points < 0);
-  nextBtn.textContent = isBusted ? "最終精算へ" : "次の局へ";
+
+  if (options.isOnline) {
+    const humanPlayers = state.players.filter((p) => p.control === "human");
+    const readyIds = Array.isArray(state.nextRoundReadyIds) ? state.nextRoundReadyIds : [];
+    const readyCount = humanPlayers.filter((p) => readyIds.includes(p.id)).length;
+    const totalHumans = humanPlayers.length;
+    const myReady = options.myPlayerId ? readyIds.includes(options.myPlayerId) : false;
+
+    const statusLine = document.createElement("p");
+    statusLine.style.margin = "8px 0 0";
+    statusLine.style.color = "#38bdf8";
+    statusLine.style.fontWeight = "700";
+    statusLine.textContent = `次局準備 OK: ${readyCount} / ${totalHumans} 人（全員OKで自動進行）`;
+    body.appendChild(statusLine);
+
+    if (myReady) {
+      nextBtn.disabled = true;
+      nextBtn.textContent = `他プレイヤー待機中 (${readyCount}/${totalHumans})`;
+    } else {
+      nextBtn.disabled = false;
+      nextBtn.textContent = isBusted ? "最終精算へ OK" : "次の局へ OK";
+    }
+  } else {
+    nextBtn.disabled = false;
+    nextBtn.textContent = isBusted ? "最終精算へ" : "次の局へ";
+  }
 
   const modal = document.getElementById("result-modal");
   if (!modal.open) modal.showModal();

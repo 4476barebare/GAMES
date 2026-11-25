@@ -189,7 +189,7 @@ function buildBuiltinDecision(state, seatIndex, prefixNote = "") {
   };
 }
 
-export async function decideAiMove({ state, seatIndex, baseRulesMd, personaPrompt }) {
+export async function decideAiMove({ state, seatIndex, apiKeySeatIndex, baseRulesMd, personaPrompt }) {
   const player = state.players[seatIndex];
   const legalActions = getLegalActions(state, seatIndex);
   const model = player.aiConfig?.model || "builtin";
@@ -199,7 +199,8 @@ export async function decideAiMove({ state, seatIndex, baseRulesMd, personaPromp
     return buildBuiltinDecision(state, seatIndex, "[API上限切替中]");
   }
 
-  const effectiveApiKey = getSeatApiKey(seatIndex);
+  const keyTargetSeat = Number.isInteger(apiKeySeatIndex) ? apiKeySeatIndex : seatIndex;
+  const effectiveApiKey = getSeatApiKey(keyTargetSeat);
   if (!effectiveApiKey || model === "builtin") {
     return buildBuiltinDecision(state, seatIndex);
   }
