@@ -944,3 +944,91 @@ html, body {
     grid-template-columns: 1fr;
   }
 }
+
+/* オンラインロビー・待機室UI */
+.badge.online-badge {
+  background: #10b981;
+  color: #052e16;
+}
+
+.lobby-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+}
+
+.lobby-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.public-rooms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 24dvh;
+  overflow-y: auto;
+}
+
+.public-room-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  background: #1e293b;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.waiting-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #0f172a;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  font-size: 0.92rem;
+}
+
+.invite-url-row {
+  display: flex;
+  gap: 6px;
+}
+
+.waiting-seats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.waiting-seat-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #0f172a;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+}
+
+.error-text {
+  color: #f87171 !important;
+  font-weight: 600;
+}
