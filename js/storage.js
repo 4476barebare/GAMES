@@ -34,8 +34,7 @@ export function loadSettings() {
     const seats = DEFAULT_SETTINGS.seats.map((def, i) =>
       normalizeSeatConfig(parsed.seats && parsed.seats[i] ? parsed.seats[i] : {}, def)
     );
-    const matchMode =
-      parsed.matchMode === "ai_vs_ai" ? "ai_vs_ai" : "human_vs_ai";
+    const matchMode = parsed.matchMode === "ai_vs_ai" ? "ai_vs_ai" : "human_vs_ai";
     return {
       matchMode,
       seats
