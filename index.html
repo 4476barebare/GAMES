@@ -30,26 +30,42 @@
 
       <!-- 上：対面（Seat 2） -->
       <div class="seat-top">
-        <div class="seat-header" id="seat-header-2">
-          <span class="wind-tag" id="wind-2">西</span>
-          <strong class="seat-name" id="name-2">対面</strong>
-          <span class="seat-pts" id="pts-2">25,000</span>
-          <span class="riichi-tag hidden" id="riichi-2">リーチ</span>
-          <span class="think-tag hidden" id="think-2">思考中</span>
+        <div class="seat-top-bar">
+          <div class="npc-anchor npc-anchor-top" id="npc-anchor-2">
+            <div class="npc-avatar-wrap npc-avatar-top hidden" id="npc-wrap-2">
+              <img class="npc-avatar-img" id="avatar-2" alt="対面キャラ" />
+            </div>
+            <div class="npc-speech-bubble speech-top" id="speech-2" aria-live="polite"></div>
+          </div>
+          <div class="seat-header" id="seat-header-2">
+            <span class="wind-tag" id="wind-2">西</span>
+            <strong class="seat-name" id="name-2">対面</strong>
+            <span class="seat-pts" id="pts-2">25,000</span>
+            <span class="riichi-tag hidden" id="riichi-2">リーチ</span>
+            <span class="think-tag hidden" id="think-2">思考中</span>
+          </div>
         </div>
         <div class="hand-row hand-opp" id="hand-2"></div>
       </div>
 
       <!-- 中段：左(上家 Seat 3・90度回転) + 中央(4家の河＆各家の副露＆HUD) + 右(下家 Seat 1・270度回転) -->
       <div class="table-middle">
-        <!-- 左：上家（Seat 3）ラベルのみ -->
+        <!-- 左：上家（Seat 3）正立キャラ＋縦バッジ -->
         <div class="seat-side seat-left">
-          <div class="rot-label rot-90" id="seat-header-3">
-            <span class="wind-tag" id="wind-3">北</span>
+          <div class="npc-anchor npc-anchor-left" id="npc-anchor-3">
+            <div class="npc-avatar-wrap npc-avatar-side hidden" id="npc-wrap-3">
+              <img class="npc-avatar-img" id="avatar-3" alt="上家キャラ" />
+            </div>
+            <div class="npc-speech-bubble speech-left" id="speech-3" aria-live="polite"></div>
+          </div>
+          <div class="side-badge" id="seat-header-3">
+            <div class="side-badge-row">
+              <span class="wind-tag" id="wind-3">北</span>
+              <span class="riichi-tag hidden" id="riichi-3">立直</span>
+            </div>
             <strong class="seat-name" id="name-3">上家</strong>
             <span class="seat-pts" id="pts-3">25,000</span>
-            <span class="riichi-tag hidden" id="riichi-3">リーチ</span>
-            <span class="think-tag hidden" id="think-3">…</span>
+            <span class="think-tag hidden" id="think-3">思考中…</span>
           </div>
         </div>
 
@@ -105,14 +121,22 @@
           </div>
         </div>
 
-        <!-- 右：下家（Seat 1）ラベルのみ -->
+        <!-- 右：下家（Seat 1）正立キャラ＋縦バッジ -->
         <div class="seat-side seat-right">
-          <div class="rot-label rot-270" id="seat-header-1">
-            <span class="wind-tag" id="wind-1">南</span>
+          <div class="npc-anchor npc-anchor-right" id="npc-anchor-1">
+            <div class="npc-avatar-wrap npc-avatar-side hidden" id="npc-wrap-1">
+              <img class="npc-avatar-img" id="avatar-1" alt="下家キャラ" />
+            </div>
+            <div class="npc-speech-bubble speech-right" id="speech-1" aria-live="polite"></div>
+          </div>
+          <div class="side-badge" id="seat-header-1">
+            <div class="side-badge-row">
+              <span class="wind-tag" id="wind-1">南</span>
+              <span class="riichi-tag hidden" id="riichi-1">立直</span>
+            </div>
             <strong class="seat-name" id="name-1">下家</strong>
             <span class="seat-pts" id="pts-1">25,000</span>
-            <span class="riichi-tag hidden" id="riichi-1">リーチ</span>
-            <span class="think-tag hidden" id="think-1">…</span>
+            <span class="think-tag hidden" id="think-1">思考中…</span>
           </div>
         </div>
       </div>
@@ -120,15 +144,21 @@
       <!-- 下：自分（Seat 0） -->
       <div class="seat-bottom">
         <!-- アクションバー -->
-        <div class="action-bar" id="action-bar">
-          <div class="seat-header compact-self" id="seat-header-0">
-            <span class="wind-tag" id="wind-0">東</span>
-            <strong class="seat-name" id="name-0">あなた</strong>
-            <span class="seat-pts" id="pts-0">25,000</span>
-            <span class="riichi-tag hidden" id="riichi-0">リーチ</span>
+        <div class="action-bar-wrap">
+          <div class="npc-speech-bubble speech-bottom" id="speech-0" aria-live="polite"></div>
+          <div class="action-bar" id="action-bar">
+            <div class="seat-header compact-self" id="seat-header-0">
+              <div class="npc-avatar-wrap npc-avatar-self hidden" id="npc-wrap-0">
+                <img class="npc-avatar-img" id="avatar-0" alt="自席キャラ" />
+              </div>
+              <span class="wind-tag" id="wind-0">東</span>
+              <strong class="seat-name" id="name-0">あなた</strong>
+              <span class="seat-pts" id="pts-0">25,000</span>
+              <span class="riichi-tag hidden" id="riichi-0">リーチ</span>
+            </div>
+            <div class="shanten-info" id="shanten-info">計算中...</div>
+            <div class="action-buttons" id="action-buttons"></div>
           </div>
-          <div class="shanten-info" id="shanten-info">計算中...</div>
-          <div class="action-buttons" id="action-buttons"></div>
         </div>
 
         <!-- 自分の手牌 -->
