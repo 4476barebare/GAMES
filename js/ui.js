@@ -2,20 +2,28 @@
  * ui.js
  * 4人麻雀 UI描画
  * ・相対席マッピング（viewerSeat基準：自分がどの席でも常に手前・下家右・対面・上家左に描画）
+ * ・NPCキャラ画像表示＆手番中の拡大演出（.active-turn）
+ * ・セリフ吹き出し表示＆順番終了に伴うフェードアウト演出
  * ・差分描画ガード・1タップ即時ハイライト・喰い替え禁止牌グレーアウト・SVG牌描画
- * ・局結果モーダル（オンライン時は全員OK人数表示＆ボタン制御）
  */
 
 import { tileIdToKind, tileIdToLabel } from "./tiles.js";
 import { getTileSvg } from "./tileSvg.js";
 import { getLegalActions } from "./engine.js";
 import { analyzeDiscardCandidates } from "./shanten.js";
+import { getNpcProfileForPlayer } from "./npc.js";
 
 const WIND_JP = { E: "東", S: "南", W: "西", N: "北" };
+const EMPH_ACTIONS = new Set(["riichi", "pon", "chi", "daiminkan", "ankan", "kakan", "ron", "tsumo"]);
+
 let lastAutoScrollDrawKey = null;
 let lastShantenCacheKey = null;
 let lastActionButtonsKey = null;
 let activeHandlers = null;
+
+// 吹き出し状態管理（actualSeat ごと）
+let lastRoundKeyForSpeech = null;
+const speechStates = new Map();
 
 function toVisualSeat(actualSeat, viewerSeat) {
   return (actualSeat - viewerSeat + 4) % 4;
@@ -23,6 +31,114 @@ function toVisualSeat(actualSeat, viewerSeat) {
 
 function toActualSeat(visualSeat, viewerSeat) {
   return (viewerSeat + visualSeat) % 4;
+}
+
+function clearSpeechTimers(st) {
+  if (!st) return;
+  if (st.holdTimer) {
+    clearTimeout(st.holdTimer);
+    st.holdTimer = null;
+  }
+  if (st.hideTimer) {
+    clearTimeout(st.hideTimer);
+    st.hideTimer = null;
+  }
+}
+
+export function resetAllSpeechBubbles() {
+  for (const st of speechStates.values()) {
+    clearSpeechTimers(st);
+  }
+  speechStates.clear();
+  lastRoundKeyForSpeech = null;
+  for (let v = 0; v < 4; v++) {
+    const el = document.getElementById(`speech-${v}`);
+    if (el) {
+      el.classList.remove("is-visible", "is-fading", "speech-emph");
+      el.textContent = "";
+    }
+  }
+}
+
+function scheduleSpeechFadeOut(actualSeat, vSeat, actionType) {
+  const st = speechStates.get(actualSeat);
+  if (!st || !st.visible || st.fadeScheduled) return;
+  st.fadeScheduled = true;
+
+  const holdMs =
+    actionType === "pass" ? 450 : EMPH_ACTIONS.has(actionType) ? 1450 : 820;
+  const fadeDurationMs = 660;
+
+  st.holdTimer = setTimeout(() => {
+    const el = document.getElementById(`speech-${vSeat}`);
+    if (el && st.visible) {
+      el.classList.add("is-fading");
+    }
+    st.hideTimer = setTimeout(() => {
+      const el2 = document.getElementById(`speech-${vSeat}`);
+      if (el2) {
+        el2.classList.remove("is-visible", "is-fading", "speech-emph");
+      }
+      st.visible = false;
+      st.fadeScheduled = false;
+      st.holdTimer = null;
+      st.hideTimer = null;
+    }, fadeDurationMs);
+  }, holdMs);
+}
+
+function syncSpeechBubble(vSeat, actualSeat, player, profile, isTurn, stateStatus) {
+  const speechEl = document.getElementById(`speech-${vSeat}`);
+  if (!speechEl) return;
+
+  if (!profile) {
+    speechEl.classList.remove("is-visible", "is-fading", "speech-emph");
+    speechEl.textContent = "";
+    return;
+  }
+
+  speechEl.style.setProperty("--npc-accent", profile.accentColor);
+
+  let st = speechStates.get(actualSeat);
+  if (!st) {
+    st = {
+      lastKey: "",
+      visible: false,
+      fadeScheduled: false,
+      holdTimer: null,
+      hideTimer: null
+    };
+    speechStates.set(actualSeat, st);
+  }
+
+  const talkText = (player.lastTalk || "").trim();
+  const talkKey = talkText
+    ? `${player.lastTalkSeq || 0}|${player.discards.length}|${player.melds.length}|${talkText}`
+    : "";
+
+  // 新しいセリフが発生したら吹き出しをくっきり表示
+  if (talkKey && talkKey !== st.lastKey) {
+    clearSpeechTimers(st);
+    st.lastKey = talkKey;
+    st.visible = true;
+    st.fadeScheduled = false;
+
+    speechEl.textContent = talkText;
+    speechEl.classList.toggle("speech-emph", EMPH_ACTIONS.has(player.lastActionType));
+    speechEl.classList.remove("is-fading");
+    speechEl.classList.add("is-visible");
+
+    // すでに順番が終わっていれば（打牌やスルー直後など）余韻後にフェードアウト開始
+    if (!isTurn || stateStatus !== "playing") {
+      scheduleSpeechFadeOut(actualSeat, vSeat, player.lastActionType);
+    }
+    return;
+  }
+
+  // ポン・チー直後など手番が続いていたキャラの順番が終わったらフェードアウトへ移行
+  if (st.visible && !st.fadeScheduled && (!isTurn || stateStatus !== "playing")) {
+    scheduleSpeechFadeOut(actualSeat, vSeat, player.lastActionType);
+  }
 }
 
 function createMiniTileIcon(code) {
@@ -143,6 +259,13 @@ export function renderGame(state, uiOptions, handlers) {
   const viewerSeat = Number.isInteger(uiOptions.viewerSeat) ? uiOptions.viewerSeat : 0;
   const showAllHands = state.status === "round_end" || state.status === "match_end";
 
+  // 局やルームが切り替わったら吹き出しをリセット
+  const roundKey = `${state.roomId || "local"}|${state.round.roundsPlayed}|${state.round.wind}${state.round.number}|${state.round.honba}`;
+  if (lastRoundKeyForSpeech !== null && lastRoundKeyForSpeech !== roundKey) {
+    resetAllSpeechBubbles();
+  }
+  lastRoundKeyForSpeech = roundKey;
+
   // 中央HUD
   document.getElementById("round-label").textContent = `${WIND_JP[state.round.wind]}${
     state.round.number
@@ -172,7 +295,6 @@ export function renderGame(state, uiOptions, handlers) {
     banner.textContent = `${WIND_JP[activePlayer.wind]}:${activePlayer.name}`;
   }
 
-  // 直前の相手（自分の画面上で visualSeat !== 0）の最新捨て牌IDを特定
   const lastDiscard = state.turn.lastDiscard;
   const latestOppDiscardTileId =
     lastDiscard && toVisualSeat(lastDiscard.playerIndex, viewerSeat) !== 0
@@ -183,15 +305,48 @@ export function renderGame(state, uiOptions, handlers) {
   for (let vSeat = 0; vSeat < 4; vSeat++) {
     const actualSeat = toActualSeat(vSeat, viewerSeat);
     const p = state.players[actualSeat];
+    const npcProfile = getNpcProfileForPlayer(p);
 
     document.getElementById(`wind-${vSeat}`).textContent = WIND_JP[p.wind];
     document.getElementById(`name-${vSeat}`).textContent = p.name;
     document.getElementById(`pts-${vSeat}`).textContent = p.points.toLocaleString();
     document.getElementById(`riichi-${vSeat}`).classList.toggle("hidden", !p.isRiichi);
 
+    const isTurn =
+      state.status === "playing" &&
+      (uiOptions.thinkingSeat === actualSeat ||
+        (state.turn.phase === "discard" && state.turn.playerIndex === actualSeat) ||
+        (state.turn.phase === "claim_check" && state.turn.pendingClaims.includes(actualSeat)));
+
     const headerEl = document.getElementById(`seat-header-${vSeat}`);
-    const isTurn = state.status === "playing" && state.turn.playerIndex === actualSeat;
     headerEl.classList.toggle("active-turn", isTurn);
+    if (npcProfile) {
+      headerEl.style.setProperty("--npc-accent", npcProfile.accentColor);
+    } else {
+      headerEl.style.removeProperty("--npc-accent");
+    }
+
+    // NPCキャラ画像＆手番拡大演出
+    const npcWrap = document.getElementById(`npc-wrap-${vSeat}`);
+    const avatarImg = document.getElementById(`avatar-${vSeat}`);
+    if (npcWrap && avatarImg) {
+      if (npcProfile) {
+        npcWrap.classList.remove("hidden");
+        npcWrap.style.setProperty("--npc-accent", npcProfile.accentColor);
+        npcWrap.classList.toggle("active-turn", isTurn);
+        if (avatarImg.dataset.src !== npcProfile.avatar) {
+          avatarImg.dataset.src = npcProfile.avatar;
+          avatarImg.src = npcProfile.avatar;
+          avatarImg.alt = npcProfile.characterName;
+        }
+      } else {
+        npcWrap.classList.add("hidden");
+        npcWrap.classList.remove("active-turn");
+      }
+    }
+
+    // 吹き出し同期（新しいセリフ表示 → 順番終了でフェードアウト）
+    syncSpeechBubble(vSeat, actualSeat, p, npcProfile, isTurn, state.status);
 
     const thinkEl = document.getElementById(`think-${vSeat}`);
     if (thinkEl) {
@@ -426,7 +581,6 @@ export function renderGame(state, uiOptions, handlers) {
     if (state.status === "playing" && self.control === "human") {
       const legal = getLegalActions(state, viewerSeat);
 
-      // 1. ツモ・ロン
       for (const act of legal.filter((a) => a.action === "tsumo" || a.action === "ron")) {
         const b = createActionTileButton(
           "btn btn-danger",
@@ -438,7 +592,6 @@ export function renderGame(state, uiOptions, handlers) {
         btnBox.appendChild(b);
       }
 
-      // 2. リーチ
       const riichiActs = legal.filter((a) => a.action === "riichi");
       for (const rAct of riichiActs) {
         const b = createActionTileButton("btn btn-warn", "立直", [rAct.tile]);
@@ -446,7 +599,6 @@ export function renderGame(state, uiOptions, handlers) {
         btnBox.appendChild(b);
       }
 
-      // 3. ポン・大明槓・暗槓・加槓
       for (const cAct of legal.filter((a) => ["pon", "daiminkan", "ankan", "kakan"].includes(a.action))) {
         const labelMap = { pon: "ポン", daiminkan: "カン", ankan: "暗槓", kakan: "加槓" };
         const b = createActionTileButton("btn btn-call", labelMap[cAct.action], [cAct.tile]);
@@ -454,7 +606,6 @@ export function renderGame(state, uiOptions, handlers) {
         btnBox.appendChild(b);
       }
 
-      // 4. チー
       for (const chiAct of legal.filter((a) => a.action === "chi")) {
         const b = createActionTileButton("btn btn-call", "チー", chiAct.consume);
         b.onclick = () => activeHandlers?.onHumanAction && activeHandlers.onHumanAction(chiAct);
@@ -475,7 +626,7 @@ function renderThoughtCards(state, uiOptions = {}) {
     state.players
       .map(
         (p) =>
-          `${p.seatIndex}|${p.id}|${p.control}|${p.wind}|${p.name}|${p.points}|${p.lastTalk}|${p.lastThought}`
+          `${p.seatIndex}|${p.id}|${p.control}|${p.aiConfig?.personaId || ""}|${p.wind}|${p.name}|${p.points}|${p.lastTalk}|${p.lastThought}`
       )
       .join("||");
   if (container.dataset.renderKey === key) return;
@@ -484,19 +635,36 @@ function renderThoughtCards(state, uiOptions = {}) {
   container.innerHTML = "";
   for (const p of state.players) {
     if (p.control === "ai") {
+      const profile = getNpcProfileForPlayer(p);
       const card = document.createElement("div");
       card.className = "thought-card";
+      if (profile) {
+        card.style.setProperty("--npc-accent", profile.accentColor);
+      }
+      const engineLabel =
+        p.aiConfig?.model === "builtin" || p.aiConfig?.fallbackActive ? "内蔵" : "Gemini";
+      const styleBadge = profile
+        ? `${profile.styleName} / ${engineLabel}`
+        : engineLabel;
+      const avatarHtml = profile
+        ? `<img class="thought-avatar" src="${profile.avatar}" alt="${escapeHtml(profile.characterName)}" />`
+        : "";
       card.innerHTML = `
-        <div class="thought-card-head">
-          <span>[${WIND_JP[p.wind]}] ${escapeHtml(p.name)}</span>
-          <span>${p.points.toLocaleString()}点</span>
+        <div class="thought-card-top">
+          ${avatarHtml}
+          <div class="thought-card-meta">
+            <div class="thought-card-head">
+              <span>[${WIND_JP[p.wind]}] ${escapeHtml(p.name)}</span>
+              <span>${p.points.toLocaleString()}点</span>
+            </div>
+            <span class="thought-style-tag">${escapeHtml(styleBadge)}</span>
+          </div>
         </div>
         <div class="thought-card-talk">${p.lastTalk ? `「${escapeHtml(p.lastTalk)}」` : "（待機中）"}</div>
         <div class="thought-card-body">${p.lastThought ? escapeHtml(p.lastThought) : "まだ打牌していません。"}</div>
       `;
       container.appendChild(card);
     } else if (isOnlineHost && p.id !== myPlayerId) {
-      // オンライン対局中：ホストには他人間プレイヤーのキック（AI代行切替）ボタンを表示
       const card = document.createElement("div");
       card.className = "thought-card";
       const head = document.createElement("div");
@@ -531,6 +699,12 @@ export function renderLogs(logs) {
   }
 }
 
+function inlineAvatarHtml(player) {
+  const prof = getNpcProfileForPlayer(player);
+  if (!prof) return "";
+  return `<img class="result-inline-avatar" src="${prof.avatar}" alt="${escapeHtml(prof.characterName)}" />`;
+}
+
 export function showRoundResultModal(state, options = {}) {
   const res = state.lastResult;
   if (!res) return;
@@ -549,9 +723,10 @@ export function showRoundResultModal(state, options = {}) {
       .map((w) => {
         const yakuStr = w.winInfo.yakus.map((y) => `${y.name}(${y.han}翻)`).join(" / ");
         const payDetail = w.winInfo.tsumoPay ? ` (${w.winInfo.tsumoPay.text})` : "";
+        const winnerPlayer = state.players[w.seatIndex];
         return `
           <div style="margin-bottom:8px;">
-            <p style="margin:2px 0;"><strong>和了者:</strong> ${escapeHtml(w.name)} / アガリ牌: <strong>${tileIdToLabel(w.winTileId, red)}</strong></p>
+            <p style="margin:2px 0;"><strong>和了者:</strong> ${inlineAvatarHtml(winnerPlayer)}${escapeHtml(w.name)} / アガリ牌: <strong>${tileIdToLabel(w.winTileId, red)}</strong></p>
             <p style="margin:2px 0;"><strong>役:</strong> ${escapeHtml(yakuStr)}</p>
             <p style="margin:2px 0;"><strong>得点:</strong> ${w.winInfo.label} <strong>${w.winInfo.points.toLocaleString()}点</strong>${payDetail}</p>
           </div>
@@ -562,7 +737,7 @@ export function showRoundResultModal(state, options = {}) {
     const scoresHtml = state.players
       .map(
         (p, i) =>
-          `${WIND_JP[p.wind]} ${escapeHtml(p.name)}: <strong>${p.points.toLocaleString()}点</strong> (${
+          `${WIND_JP[p.wind]} ${inlineAvatarHtml(p)}${escapeHtml(p.name)}: <strong>${p.points.toLocaleString()}点</strong> (${
             res.scoreDeltas[i] >= 0 ? "+" : ""
           }${res.scoreDeltas[i].toLocaleString()})`
       )
@@ -578,7 +753,7 @@ export function showRoundResultModal(state, options = {}) {
     const scoresHtml = state.players
       .map(
         (p, i) =>
-          `${WIND_JP[p.wind]} ${escapeHtml(p.name)}: <strong>${p.points.toLocaleString()}点</strong> (${
+          `${WIND_JP[p.wind]} ${inlineAvatarHtml(p)}${escapeHtml(p.name)}: <strong>${p.points.toLocaleString()}点</strong> (${
             res.scoreDeltas[i] >= 0 ? "+" : ""
           }${res.scoreDeltas[i].toLocaleString()})`
       )
@@ -634,10 +809,11 @@ export function showMatchEndModal(state) {
       const cls = st.finalScore >= 0 ? "score-pos" : "score-neg";
       const sign = st.finalScore >= 0 ? "+" : "";
       const umaSign = st.uma >= 0 ? "+" : "";
+      const pl = state.players[st.seatIndex];
       return `
         <tr>
           <td><strong>${st.rank}位</strong></td>
-          <td>${escapeHtml(st.name)}</td>
+          <td>${inlineAvatarHtml(pl)}${escapeHtml(st.name)}</td>
           <td>${st.points.toLocaleString()}点</td>
           <td>${st.rawDiffPt >= 0 ? "+" : ""}${st.rawDiffPt.toFixed(1)}</td>
           <td>${umaSign}${st.uma}${st.oka > 0 ? ` (+${st.oka})` : ""}</td>

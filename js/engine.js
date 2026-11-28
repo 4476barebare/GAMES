@@ -58,7 +58,7 @@ export function createMatchState(options = {}) {
     { id: "p0", name: "あなた", control: "human", aiConfig: null },
     {
       id: "p1",
-      name: "内蔵(デジタル派)",
+      name: "アリス",
       control: "ai",
       aiConfig: {
         provider: "gemini",
@@ -71,7 +71,7 @@ export function createMatchState(options = {}) {
     },
     {
       id: "p2",
-      name: "内蔵(超攻撃型)",
+      name: "白ウサギ",
       control: "ai",
       aiConfig: {
         provider: "gemini",
@@ -84,7 +84,7 @@ export function createMatchState(options = {}) {
     },
     {
       id: "p3",
-      name: "内蔵(鉄壁守備派)",
+      name: "チェシャ猫",
       control: "ai",
       aiConfig: {
         provider: "gemini",
@@ -132,7 +132,9 @@ export function createMatchState(options = {}) {
       isTempFuriten: false,
       isRiichiFuriten: false,
       lastThought: "",
-      lastTalk: ""
+      lastTalk: "",
+      lastTalkSeq: 0,
+      lastActionType: ""
     });
   }
 
@@ -207,6 +209,8 @@ function dealRound(prevState) {
     p.isRiichiFuriten = false;
     p.lastThought = "";
     p.lastTalk = "";
+    p.lastTalkSeq = 0;
+    p.lastActionType = "";
   }
 
   const dealer = state.players[dealerIndex];
@@ -600,7 +604,13 @@ export function applyAction(prevState, seatIndex, actionObj, meta = {}) {
   const red = state.config.redDora;
 
   if (meta.thought !== undefined) p.lastThought = meta.thought;
-  if (meta.talk !== undefined) p.lastTalk = meta.talk;
+  if (meta.talk !== undefined) {
+    p.lastTalk = meta.talk;
+    if (meta.talk) {
+      p.lastTalkSeq = (p.lastTalkSeq || 0) + 1;
+    }
+  }
+  p.lastActionType = actionObj.action || "";
 
   if (actionObj.action === "tsumo") {
     const isDealer = seatIndex === state.round.dealerIndex;

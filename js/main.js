@@ -31,8 +31,15 @@ import {
   updateSelectedTileHighlight,
   renderLogs,
   showRoundResultModal,
-  showMatchEndModal
+  showMatchEndModal,
+  resetAllSpeechBubbles
 } from "./ui.js";
+import {
+  DEFAULT_NPC_PROFILES,
+  setNpcProfiles,
+  getNpcProfile,
+  getNpcProfileForPlayer
+} from "./npc.js";
 
 const SEAT_NAMES = ["自席（手前）", "下家（右）", "対面（上）", "上家（左）"];
 const POLL_INTERVAL_MS = 2500;
@@ -88,15 +95,12 @@ async function loadExternalAssets() {
     ]);
     baseRulesMd = await rulesRes.text();
     personas = await personaRes.json();
+    setNpcProfiles(personas);
   } catch (e) {
     console.warn("Asset load fallback:", e);
     baseRulesMd = "あなたは4人麻雀プレイヤーです。合法アクション一覧から最適な手をJSONで返してください。";
-    personas = [
-      { id: "digital_balanced", name: "デジタル派", prompt: "期待値と受け入れ枚数重視で打ちます。" },
-      { id: "aggressive_riichi", name: "超攻撃型", prompt: "聴牌即リーチと仕掛けで押し返します。" },
-      { id: "occult_flow", name: "オカルト派", prompt: "ドラと流れを重視します。" },
-      { id: "iron_defense", name: "鉄壁守備派", prompt: "放銃回避を最優先します。" }
-    ];
+    personas = DEFAULT_NPC_PROFILES.map((p) => ({ ...p }));
+    setNpcProfiles(personas);
   }
 }
 
@@ -117,10 +121,10 @@ function pushLog(text) {
 }
 
 function buildSeatDisplayName(seatCfg) {
+  const profile = getNpcProfile(seatCfg.personaId);
   const hasSeatKey = Boolean((seatCfg.apiKey || "").trim());
   const isBuiltin = seatCfg.model === "builtin" || !hasSeatKey;
-  const tag = isBuiltin ? "内蔵" : "AI";
-  return `${tag}(${getPersonaName(seatCfg.personaId)})`;
+  return isBuiltin ? profile.characterName : `${profile.characterName}(AI)`;
 }
 
 function updateModeBadgeUI() {
@@ -153,6 +157,7 @@ async function startNewOfflineMatch() {
   isProcessing = false;
   thinkingSeat = null;
   selectedTileId = null;
+  resetAllSpeechBubbles();
   clearMatchSession();
 
   const resModal = document.getElementById("result-modal");
@@ -203,7 +208,14 @@ async function restoreOfflineOrStart() {
     let needsResave = false;
     if (Array.isArray(gameState.players)) {
       gameState.players.forEach((p) => {
-        if (typeof p.name === "string") {
+        if (p.control === "ai" && p.aiConfig?.personaId) {
+          const prof = getNpcProfile(p.aiConfig.personaId);
+          if (/^(?:[自下対上]・)?(?:内蔵|AI)\(/.test(p.name || "")) {
+            const isGemini = p.aiConfig.model !== "builtin" && !p.aiConfig.fallbackActive && /^AI\(/.test(p.name.replace(/^[自下対上]・/, ""));
+            p.name = isGemini ? `${prof.characterName}(AI)` : prof.characterName;
+            needsResave = true;
+          }
+        } else if (typeof p.name === "string") {
           const cleanedName = p.name.replace(/^[自下対上]・/, "");
           if (cleanedName !== p.name) {
             p.name = cleanedName;
@@ -282,18 +294,24 @@ function refreshUI() {
   );
 }
 
-function formatActionLog(actorName, actionObj) {
+function formatActionLog(actor, actionObj, meta = {}) {
+  const actorName = typeof actor === "string" ? actor : actor?.name || "プレイヤー";
+  const prof = typeof actor === "object" ? getNpcProfileForPlayer(actor) : null;
+  const icon = prof ? `${prof.emoji} ` : "";
+  const talkSuffix =
+    meta?.talk && actionObj.action !== "pass" ? `「${meta.talk}」` : "";
+
   const logMap = {
-    discard: `${actorName}: ${actionObj.tile} 切り`,
-    riichi: `🔥 ${actorName}: リーチ宣言！（${actionObj.tile} 切り）`,
-    tsumo: `🀄 ${actorName}: ツモ和了！`,
-    ron: `⚡ ${actorName}: ロン宣言！`,
-    pon: `📣 ${actorName}: ポン（${actionObj.tile}）`,
-    chi: `📣 ${actorName}: チー（${actionObj.tile}）`,
-    daiminkan: `💥 ${actorName}: 大明槓（${actionObj.tile}）`,
-    ankan: `💥 ${actorName}: 暗槓（${actionObj.tile}）`,
-    kakan: `💥 ${actorName}: 加槓（${actionObj.tile}）`,
-    pass: `${actorName}: スルー`
+    discard: `${icon}${actorName}: ${actionObj.tile} 切り${talkSuffix}`,
+    riichi: `🔥 ${icon}${actorName}: リーチ宣言！（${actionObj.tile} 切り）${talkSuffix}`,
+    tsumo: `✨ ${icon}${actorName}: ツモ和了！${talkSuffix}`,
+    ron: `⚡ ${icon}${actorName}: ロン宣言！${talkSuffix}`,
+    pon: `📣 ${icon}${actorName}: ポン（${actionObj.tile}）${talkSuffix}`,
+    chi: `📣 ${icon}${actorName}: チー（${actionObj.tile}）${talkSuffix}`,
+    daiminkan: `💥 ${icon}${actorName}: 大明槓（${actionObj.tile}）${talkSuffix}`,
+    ankan: `💥 ${icon}${actorName}: 暗槓（${actionObj.tile}）${talkSuffix}`,
+    kakan: `💥 ${icon}${actorName}: 加槓（${actionObj.tile}）${talkSuffix}`,
+    pass: `${icon}${actorName}: スルー`
   };
   return logMap[actionObj.action] || "";
 }
@@ -342,7 +360,7 @@ async function handlePlayerAction(seatIndex, actionObj, meta = {}, token = loopT
     if (!isOnlineMode) {
       const actor = gameState.players[seatIndex];
       gameState = applyAction(gameState, seatIndex, actionObj, meta);
-      const logLine = formatActionLog(actor.name, actionObj);
+      const logLine = formatActionLog(actor, actionObj, meta);
       if (logLine) pushLog(logLine);
 
       await localSync.saveState(gameState, gameLogs);
@@ -361,7 +379,7 @@ async function handlePlayerAction(seatIndex, actionObj, meta = {}, token = loopT
         if (updated.status === "round_end") {
           updated.nextRoundReadyIds = [];
         }
-        const logLine = formatActionLog(actor.name, actionObj);
+        const logLine = formatActionLog(actor, actionObj, meta);
         const updatedLogs = logLine ? [logLine, ...baseLogs].slice(0, 120) : baseLogs;
         return { nextState: updated, nextLogs: updatedLogs };
       });
@@ -442,7 +460,7 @@ async function stepGameLoop(token) {
     Boolean(getSeatApiKey(apiKeySeat)) &&
     aiPlayer.aiConfig?.model !== "builtin" &&
     !aiPlayer.aiConfig?.fallbackActive;
-  const waitMs = hasApi ? 300 : 220;
+  const waitMs = hasApi ? 260 : 500;
   await new Promise((r) => setTimeout(r, waitMs));
   if (token !== loopToken) return;
 
@@ -462,7 +480,7 @@ async function stepGameLoop(token) {
     const prevName = aiPlayer.name;
     aiPlayer.aiConfig.fallbackActive = true;
     aiPlayer.aiConfig.fallbackReason = decision.switchReason || "API上限到達";
-    aiPlayer.name = `内蔵(${getPersonaName(aiPlayer.aiConfig.personaId)})`;
+    aiPlayer.name = getNpcProfile(aiPlayer.aiConfig.personaId).characterName;
     pushLog(
       `⚠️ ${prevName}: ${aiPlayer.aiConfig.fallbackReason}のため、この半荘は内蔵AIへ自動切替しました`
     );
@@ -1067,8 +1085,12 @@ function renderSeatSettingsForm(currentSettings) {
       )
       .join("");
 
+    const curProf = getNpcProfile(sCfg.personaId);
     card.innerHTML = `
-      <div class="seat-cfg-title">${SEAT_NAMES[idx]}${note}</div>
+      <div class="seat-cfg-head">
+        <img class="seat-cfg-avatar" id="seat-avatar-preview-${idx}" src="${curProf.avatar}" alt="${curProf.characterName}" style="--npc-accent:${curProf.accentColor}" />
+        <div class="seat-cfg-title">${SEAT_NAMES[idx]}${note}</div>
+      </div>
       <div class="seat-cfg-grid">
         <label class="field">
           <span>モデル</span>
@@ -1080,7 +1102,7 @@ function renderSeatSettingsForm(currentSettings) {
           </select>
         </label>
         <label class="field">
-          <span>性格・打ち筋</span>
+          <span>キャラクター / 打ち筋</span>
           <select id="seat-persona-${idx}">${personaOptions}</select>
         </label>
         <label class="field">
@@ -1094,6 +1116,16 @@ function renderSeatSettingsForm(currentSettings) {
       </label>
     `;
     listEl.appendChild(card);
+    const personaSel = card.querySelector(`#seat-persona-${idx}`);
+    const previewImg = card.querySelector(`#seat-avatar-preview-${idx}`);
+    if (personaSel && previewImg) {
+      personaSel.addEventListener("change", () => {
+        const nextProf = getNpcProfile(personaSel.value);
+        previewImg.src = nextProf.avatar;
+        previewImg.alt = nextProf.characterName;
+        previewImg.style.setProperty("--npc-accent", nextProf.accentColor);
+      });
+    }
   });
 }
 
